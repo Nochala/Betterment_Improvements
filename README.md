@@ -11,14 +11,11 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 - **See the [full feature list wiki](https://github.com/Nochala/Fusion_Fix_RDR2/wiki/Full-Feature-List) for all available options.**
 - **All features can be individually enabled or disabled through the `INI` fle or the in-game Fusion Fix Settings menu.**
 - **Many features replace & overlap other mods. If you prefer another mod's implementation, simply disable the corresponding feature in Fusion Fix.**
+- **Development is still work in progress, some features are experimental.**
 
 ### Requirements
 - [**Latest ASI loader**](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases) (preferably dinput8.dll)
 - [**Latest ScriptHookRDR2**](https://www.dev-c.com/rdr2/scripthookrdr2/)
-
-### Known Issues
-
-**Fusion Fix is still a work in progress. Some features are experimental and may not work correctly.**
 
 
 ### Credits
