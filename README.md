@@ -8,7 +8,7 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 
 
 ## Features
-- Feature list hosted in this mods WIKI.
+See the [full feature list](https://github.com/Nochala/Fusion_Fix_RDR2/wiki/Full-Feature-List) for all available options and what they do.
 
 
 ### Requirements
