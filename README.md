@@ -9,50 +9,29 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 
 ## Features
 
-Every option below uses the same name and order as the `FusionFixRDR2.ini` file. Open a section, then select any setting to see what it does.
+The options below are listed in the same order as `FusionFixRDR2.ini`. Expand a section to see its features.
 
 <details>
 <summary><strong>General</strong></summary>
 
-<details>
-<summary><code>Enabled</code></summary>
-<p>Turns Fusion Fix RDR2 on or off without needing to remove the mod.</p>
-</details>
+<p><strong><code>Enabled</code></strong> — Turns Fusion Fix RDR2 on or off without needing to remove the mod.</p>
 
-<details>
-<summary><code>SettingsMenu</code></summary>
-<p>Adds Fusion Fix Settings under Settings → General so you can change the mod’s options in-game.</p>
-</details>
+<p><strong><code>SettingsMenu</code></strong> — Adds Fusion Fix Settings under Settings → General so you can change the mod’s options in-game.</p>
 
-<details>
-<summary><code>Logging</code></summary>
-<p>Enables the mod’s regular log output.</p>
-</details>
+<p><strong><code>Logging</code></strong> — Enables the mod’s regular log output.</p>
 
-<details>
-<summary><code>DebugLogging</code></summary>
-<p>Enables extra debug logging for troubleshooting.</p>
-</details>
+<p><strong><code>DebugLogging</code></strong> — Enables extra debug logging for troubleshooting.</p>
 
 </details>
 
 <details>
 <summary><strong>Startup</strong></summary>
 
-<details>
-<summary><code>SkipIntroSplashes</code></summary>
-<p>Skips the Rockstar intro splash when starting the game.</p>
-</details>
+<p><strong><code>SkipIntroSplashes</code></strong> — Skips the Rockstar intro splash when starting the game.</p>
 
-<details>
-<summary><code>SkipLegal</code></summary>
-<p>Skips the legal notices shown during startup.</p>
-</details>
+<p><strong><code>SkipLegal</code></strong> — Skips the legal notices shown during startup.</p>
 
-<details>
-<summary><code>StraightToStoryMode</code></summary>
-<p>Loads straight into Story Mode instead of stopping at the main menu.</p>
-</details>
+<p><strong><code>StraightToStoryMode</code></strong> — Loads straight into Story Mode instead of stopping at the main menu.</p>
 
 </details>
 
@@ -61,228 +40,108 @@ Every option below uses the same name and order as the `FusionFixRDR2.ini` file.
 
 <p><em>The SSR settings at the bottom of this section are experimental, currently buggy, and only described as working with Vulkan.</em></p>
 
-<details>
-<summary><code>YTDCrashFix</code></summary>
-<p>Fixes crashes related to YTD texture files.</p>
-</details>
+<p><strong><code>YTDCrashFix</code></strong> — Fixes crashes related to YTD texture files.</p>
 
-<details>
-<summary><code>ExtendHeapLimits</code></summary>
-<p>Raises the engine’s heap memory limit to help avoid allocation failures.</p>
-</details>
+<p><strong><code>ExtendHeapLimits</code></strong> — Raises the engine’s heap memory limit to help avoid allocation failures.</p>
 
-<details>
-<summary><code>ExtendPackfileLimits</code></summary>
-<p>Increases the number of packfiles the engine can handle, helping avoid loading failures and crashes.</p>
-</details>
+<p><strong><code>ExtendPackfileLimits</code></strong> — Increases the number of packfiles the engine can handle, helping avoid loading failures and crashes.</p>
 
-<details>
-<summary><code>ExtendStreamingPools</code></summary>
-<p>Raises streaming pool limits to help prevent crashes and other problems when those pools fill up.</p>
-</details>
+<p><strong><code>ExtendStreamingPools</code></strong> — Raises streaming pool limits to help prevent crashes and other problems when those pools fill up.</p>
 
-<details>
-<summary><code>ExtendAssetPools</code></summary>
-<p>Raises asset pool limits to improve stability and help reduce texture pop-in.</p>
-</details>
+<p><strong><code>ExtendAssetPools</code></strong> — Raises asset pool limits to improve stability and help reduce texture pop-in.</p>
 
-<details>
-<summary><code>OptimizeStreamingMemory</code></summary>
-<p>Improves how streaming memory is allocated to reduce overhead and smooth out frametimes.</p>
-</details>
+<p><strong><code>OptimizeStreamingMemory</code></strong> — Improves how streaming memory is allocated to reduce overhead and smooth out frametimes.</p>
 
-<details>
-<summary><code>TextureStreamingStutterFix</code></summary>
-<p>Reduces stuttering tied to texture streaming and asset loading.</p>
-</details>
+<p><strong><code>TextureStreamingStutterFix</code></strong> — Reduces stuttering tied to texture streaming and asset loading.</p>
 
-<details>
-<summary><code>ImproveTextureStreaming</code></summary>
-<p>Expands streaming read buffers to help prevent delays when loading assets in demanding areas. Separate from TextureStreamingStutterFix.</p>
-</details>
+<p><strong><code>ImproveTextureStreaming</code></strong> — Expands streaming read buffers to help prevent delays when loading assets in demanding areas. Separate from TextureStreamingStutterFix.</p>
 
-<details>
-<summary><code>ExtendPedMemoryLimits</code></summary>
-<p>Raises pedestrian memory limits to reduce NPC pop-in and keep population streaming more consistent.</p>
-</details>
+<p><strong><code>ExtendPedMemoryLimits</code></strong> — Raises pedestrian memory limits to reduce NPC pop-in and keep population streaming more consistent.</p>
 
 <h4>Experimental - work in progress</h4>
 
-<details>
-<summary><code>ExpandSSRCoverage</code></summary>
-<p>Experimental attempt to extend screen-space reflection coverage using FOV and shader changes. Currently buggy and Vulkan-only.</p>
-</details>
+<p><strong><code>ExpandSSRCoverage</code></strong> — Experimental attempt to extend screen-space reflection coverage using FOV and shader changes. Currently buggy and Vulkan-only.</p>
 
-<details>
-<summary><code>SSROverscanScale</code></summary>
-<p>Adjusts the overscan scale used by the experimental screen-space reflection feature.</p>
-</details>
+<p><strong><code>SSROverscanScale</code></strong> — Adjusts the overscan scale used by the experimental screen-space reflection feature.</p>
 
-<details>
-<summary><code>SSROverscanTestMode</code></summary>
-<p>Selects the test mode for the experimental screen-space reflection feature. Test modes are not described in the current INI.</p>
-</details>
+<p><strong><code>SSROverscanTestMode</code></strong> — Selects the test mode for the experimental screen-space reflection feature. Test modes are not described in the current INI.</p>
 
 </details>
 
 <details>
 <summary><strong>Gameplay</strong></summary>
 
-<details>
-<summary><code>DisableAutoAmmoPickup</code></summary>
-<p>Stops ammo from being picked up automatically from bodies and dropped weapons.</p>
-</details>
+<p><strong><code>DisableAutoAmmoPickup</code></strong> — Stops ammo from being picked up automatically from bodies and dropped weapons.</p>
 
-<details>
-<summary><code>DisableAutoHorseEquip</code></summary>
-<p>Stops the game from automatically equipping weapons when you dismount during missions.</p>
-</details>
+<p><strong><code>DisableAutoHorseEquip</code></strong> — Stops the game from automatically equipping weapons when you dismount during missions.</p>
 
-<details>
-<summary><code>DisableAutoHorseHolster</code></summary>
-<p>Keeps the game from automatically holstering your weapons while riding.</p>
-</details>
+<p><strong><code>DisableAutoHorseHolster</code></strong> — Keeps the game from automatically holstering your weapons while riding.</p>
 
-<details>
-<summary><code>DisableOutOfBoundSnipers</code></summary>
-<p>Removes the invisible snipers that kill you when entering certain restricted or out-of-bounds areas.</p>
-</details>
+<p><strong><code>DisableOutOfBoundSnipers</code></strong> — Removes the invisible snipers that kill you when entering certain restricted or out-of-bounds areas.</p>
 
 <h4>Honor</h4>
 
-<details>
-<summary><code>DisableHonorLossWhenMasked</code></summary>
-<p>Prevents honor loss from crimes committed while wearing a mask or face covering.</p>
-</details>
+<p><strong><code>DisableHonorLossWhenMasked</code></strong> — Prevents honor loss from crimes committed while wearing a mask or face covering.</p>
 
-<details>
-<summary><code>DisableBodySearchHonorLoss</code></summary>
-<p>Stops you from losing honor when searching dead bodies.</p>
-</details>
+<p><strong><code>DisableBodySearchHonorLoss</code></strong> — Stops you from losing honor when searching dead bodies.</p>
 
-<details>
-<summary><code>DisableAntagonizehHonorLoss</code></summary>
-<p>Stops antagonizing NPCs from lowering your honor.</p>
-</details>
+<p><strong><code>DisableAntagonizehHonorLoss</code></strong> — Stops antagonizing NPCs from lowering your honor.</p>
 
-<details>
-<summary><code>FixSelfDefenseHonorLoss</code></summary>
-<p>Prevents honor loss for defending yourself against someone who attacked first.</p>
-</details>
+<p><strong><code>FixSelfDefenseHonorLoss</code></strong> — Prevents honor loss for defending yourself against someone who attacked first.</p>
 
-<details>
-<summary><code>DisableHonorSystem</code></summary>
-<p>Freezes your current honor level so it can no longer go up or down.</p>
-</details>
+<p><strong><code>DisableHonorSystem</code></strong> — Freezes your current honor level so it can no longer go up or down.</p>
 
 <h4>Bounty</h4>
 
-<details>
-<summary><code>DisableBountyWhenMasked</code></summary>
-<p>Prevents bounties from being issued for crimes committed while masked.</p>
-</details>
+<p><strong><code>DisableBountyWhenMasked</code></strong> — Prevents bounties from being issued for crimes committed while masked.</p>
 
-<details>
-<summary><code>FixSelfDefenseBounties</code></summary>
-<p>Prevents bounties for defending yourself against someone who attacked first.</p>
-</details>
+<p><strong><code>FixSelfDefenseBounties</code></strong> — Prevents bounties for defending yourself against someone who attacked first.</p>
 
-<details>
-<summary><code>DisableBounties</code></summary>
-<p>Prevents new bounties while keeping the wanted system active.</p>
-</details>
+<p><strong><code>DisableBounties</code></strong> — Prevents new bounties while keeping the wanted system active.</p>
 
 <h4>Horse</h4>
 
-<details>
-<summary><code>FixHorseFollowBehavior</code></summary>
-<p>Improves how your horse follows you so it is less likely to fall behind or get stuck.</p>
-</details>
+<p><strong><code>FixHorseFollowBehavior</code></strong> — Improves how your horse follows you so it is less likely to fall behind or get stuck.</p>
 
-<details>
-<summary><code>DisableHorseAutoJump</code></summary>
-<p>Stops your horse from jumping obstacles automatically. You can still jump manually.</p>
-</details>
+<p><strong><code>DisableHorseAutoJump</code></strong> — Stops your horse from jumping obstacles automatically. You can still jump manually.</p>
 
-<details>
-<summary><code>DisableHorseWhistleDistance</code></summary>
-<p>Removes the distance limit for calling your horse with a whistle.</p>
-</details>
+<p><strong><code>DisableHorseWhistleDistance</code></strong> — Removes the distance limit for calling your horse with a whistle.</p>
 
 </details>
 
 <details>
-<summary><strong>Player</strong> </summary>
+<summary><strong>Player</strong></summary>
 
-<details>
-<summary><code>DisableFirstPersonAutoRun</code></summary>
-<p>Makes walking the default in first person instead of automatically running.</p>
-</details>
+<p><strong><code>DisableFirstPersonAutoRun</code></strong> — Makes walking the default in first person instead of automatically running.</p>
 
-<details>
-<summary><code>QuickLootBodies</code></summary>
-<p>Uses the quicker fallback animation when looting bodies.</p>
-</details>
+<p><strong><code>QuickLootBodies</code></strong> — Uses the quicker fallback animation when looting bodies.</p>
 
-<details>
-<summary><code>QuickLootAnimals</code></summary>
-<p>Uses the quicker fallback animation when looting animals.</p>
-</details>
+<p><strong><code>QuickLootAnimals</code></strong> — Uses the quicker fallback animation when looting animals.</p>
 
 </details>
 
 <details>
 <summary><strong>Weapons</strong></summary>
 
-<details>
-<summary><code>DisableEmptyAutoReload</code></summary>
-<p>Stops your weapon from reloading automatically when its ammunition runs out.</p>
-</details>
+<p><strong><code>DisableEmptyAutoReload</code></strong> — Stops your weapon from reloading automatically when its ammunition runs out.</p>
 
-<details>
-<summary><code>DisableAutoReload</code></summary>
-<p>Disables automatic weapon reloading in general.</p>
-</details>
+<p><strong><code>DisableAutoReload</code></strong> — Disables automatic weapon reloading in general.</p>
 
-<details>
-<summary><code>DisableDeadEyeAutoReload</code></summary>
-<p>Stops the automatic reload that happens while using Dead Eye.</p>
-</details>
+<p><strong><code>DisableDeadEyeAutoReload</code></strong> — Stops the automatic reload that happens while using Dead Eye.</p>
 
-<details>
-<summary><code>DisableForcedScope</code></summary>
-<p>Lets you use compatible rifles, such as the Carcano and Rolling Block, without being forced into their scopes.</p>
-</details>
+<p><strong><code>DisableForcedScope</code></strong> — Lets you use compatible rifles, such as the Carcano and Rolling Block, without being forced into their scopes.</p>
 
-<details>
-<summary><code>DisableHitmarkers</code></summary>
-<p>Removes the hitmarkers shown when you shoot enemies.</p>
-</details>
+<p><strong><code>DisableHitmarkers</code></strong> — Removes the hitmarkers shown when you shoot enemies.</p>
 
-<details>
-<summary><code>DisableReticleHighlighting</code></summary>
-<p>Stops the aiming reticle from changing color when aimed at an enemy.</p>
-</details>
+<p><strong><code>DisableReticleHighlighting</code></strong> — Stops the aiming reticle from changing color when aimed at an enemy.</p>
 
-<details>
-<summary><code>DisableArrowTrails</code></summary>
-<p>Removes the arrow trajectory trail shown while aiming a bow.</p>
-</details>
+<p><strong><code>DisableArrowTrails</code></strong> — Removes the arrow trajectory trail shown while aiming a bow.</p>
 
-<details>
-<summary><code>DisableReticleSpread</code></summary>
-<p>Stops the aiming reticle from spreading when you aim and fire.</p>
-</details>
+<p><strong><code>DisableReticleSpread</code></strong> — Stops the aiming reticle from spreading when you aim and fire.</p>
 
-<details>
-<summary><code>DisableReticleSway</code></summary>
-<p>Stops the aiming reticle from swaying when you aim and fire.</p>
-</details>
+<p><strong><code>DisableReticleSway</code></strong> — Stops the aiming reticle from swaying when you aim and fire.</p>
 
-<details>
-<summary><code>DisableWeaponDegradation</code></summary>
-<p>Prevents weapons from wearing down over time, so they no longer need cleaning.</p>
-</details>
+<p><strong><code>DisableWeaponDegradation</code></strong> — Prevents weapons from wearing down over time, so they no longer need cleaning.</p>
 
 </details>
 
@@ -291,116 +150,53 @@ Every option below uses the same name and order as the `FusionFixRDR2.ini` file.
 
 <p><em>The recoil reduction settings at the bottom of this section are marked broken in the current INI.</em></p>
 
-<details>
-<summary><code>RemoveBlackBars</code></summary>
-<p>Removes the black bars that appear during cutscenes and cinematic sequences.</p>
-</details>
+<p><strong><code>RemoveBlackBars</code></strong> — Removes the black bars that appear during cutscenes and cinematic sequences.</p>
 
-<details>
-<summary><code>EnableDLSSAutoExposure</code></summary>
-<p>Enables auto exposure with DLSS or DLAA to help reduce visual artifacts.</p>
-</details>
+<p><strong><code>EnableDLSSAutoExposure</code></strong> — Enables auto exposure with DLSS or DLAA to help reduce visual artifacts.</p>
 
-<details>
-<summary><code>FixFullscreenTabOut</code></summary>
-<p>Restores fullscreen mode automatically when you tab back into the game.</p>
-</details>
+<p><strong><code>FixFullscreenTabOut</code></strong> — Restores fullscreen mode automatically when you tab back into the game.</p>
 
-<details>
-<summary><code>MinimizeOnTabOut</code></summary>
-<p>Minimizes the game window when you Alt+Tab away.</p>
-</details>
+<p><strong><code>MinimizeOnTabOut</code></strong> — Minimizes the game window when you Alt+Tab away.</p>
 
-<details>
-<summary><code>DisableIdleCamera</code></summary>
-<p>Stops the automatic cinematic camera that appears when you leave the game idle.</p>
-</details>
+<p><strong><code>DisableIdleCamera</code></strong> — Stops the automatic cinematic camera that appears when you leave the game idle.</p>
 
-<details>
-<summary><code>ReduceCameraShake</code></summary>
-<p>Cuts down on camera shake during gameplay.</p>
-</details>
+<p><strong><code>ReduceCameraShake</code></strong> — Cuts down on camera shake during gameplay.</p>
 
-<details>
-<summary><code>ReduceCameraSway</code></summary>
-<p>Cuts down on camera sway during gameplay.</p>
-</details>
+<p><strong><code>ReduceCameraSway</code></strong> — Cuts down on camera sway during gameplay.</p>
 
-<details>
-<summary><code>DisableHeadBob</code></summary>
-<p>Removes the head-bobbing effect while moving.</p>
-</details>
+<p><strong><code>DisableHeadBob</code></strong> — Removes the head-bobbing effect while moving.</p>
 
-<details>
-<summary><code>CameraFOVOffset</code></summary>
-<p>Adjusts the camera FOV beyond the normal limits. Positive values widen it; negative values narrow it. Range: -3.0 to 3.0. Use 0.0 to disable.</p>
-</details>
+<p><strong><code>CameraFOVOffset</code></strong> — Adjusts the camera FOV beyond the normal limits. Positive values widen it; negative values narrow it. Range: -3.0 to 3.0. Use 0.0 to disable.</p>
 
 <h4>World</h4>
 
-<details>
-<summary><code>DisableInteriorLighting</code></summary>
-<p>Disables interior lighting effects in buildings and other enclosed spaces.</p>
-</details>
+<p><strong><code>DisableInteriorLighting</code></strong> — Disables interior lighting effects in buildings and other enclosed spaces.</p>
 
-<details>
-<summary><code>DisableDistantLights</code></summary>
-<p>Disables distant light sources. This can cause bloom artifacts.</p>
-</details>
+<p><strong><code>DisableDistantLights</code></strong> — Disables distant light sources. This can cause bloom artifacts.</p>
 
 <h4>Filters</h4>
 
-<details>
-<summary><code>DisableDrunkFilter</code></summary>
-<p>Removes the visual distortion that appears when your character is drunk.</p>
-</details>
+<p><strong><code>DisableDrunkFilter</code></strong> — Removes the visual distortion that appears when your character is drunk.</p>
 
-<details>
-<summary><code>DisableEagleEyeFilter</code></summary>
-<p>Removes the screen filter applied during Eagle Eye.</p>
-</details>
+<p><strong><code>DisableEagleEyeFilter</code></strong> — Removes the screen filter applied during Eagle Eye.</p>
 
-<details>
-<summary><code>DisableDeadEyeFilter</code></summary>
-<p>Removes the screen filter applied during Dead Eye.</p>
-</details>
+<p><strong><code>DisableDeadEyeFilter</code></strong> — Removes the screen filter applied during Dead Eye.</p>
 
-<details>
-<summary><code>DisablePauseMenuFilter</code></summary>
-<p>Removes the visual filter shown behind the pause menu.</p>
-</details>
+<p><strong><code>DisablePauseMenuFilter</code></strong> — Removes the visual filter shown behind the pause menu.</p>
 
-<details>
-<summary><code>DisableWeaponWheelFilter</code></summary>
-<p>Removes the screen filter shown while the weapon wheel is open.</p>
-</details>
+<p><strong><code>DisableWeaponWheelFilter</code></strong> — Removes the screen filter shown while the weapon wheel is open.</p>
 
-<details>
-<summary><code>DisableLowHealthFilter</code></summary>
-<p>Removes the visual effects that appear when your health is critically low.</p>
-</details>
+<p><strong><code>DisableLowHealthFilter</code></strong> — Removes the visual effects that appear when your health is critically low.</p>
 
 <h4>Experimental - currently broken</h4>
 
-<details>
-<summary><code>ReduceWeaponRecoil</code></summary>
-<p>Experimental recoil reduction for firing weapons. Marked as broken in the current INI.</p>
-</details>
+<p><strong><code>ReduceWeaponRecoil</code></strong> — Experimental recoil reduction for firing weapons. Marked as broken in the current INI.</p>
 
-<details>
-<summary><code>RecoilShakeAmplitudeScale</code></summary>
-<p>Sets the recoil reduction amount for ReduceWeaponRecoil. In the INI, 0.00 means maximum reduction and 0.50 means 50% reduction. The parent feature is currently marked broken.</p>
-</details>
+<p><strong><code>RecoilShakeAmplitudeScale</code></strong> — Sets the recoil reduction amount for ReduceWeaponRecoil. In the INI, 0.00 means maximum reduction and 0.50 means 50% reduction. The parent feature is currently marked broken.</p>
 
-<details>
-<summary><code>ReduceFirstPersonWeaponRecoil</code></summary>
-<p>Experimental first-person recoil reduction. Marked as broken in the current INI.</p>
-</details>
+<p><strong><code>ReduceFirstPersonWeaponRecoil</code></strong> — Experimental first-person recoil reduction. Marked as broken in the current INI.</p>
 
-<details>
-<summary><code>FirstPersonRecoilShakeAmplitudeScale</code></summary>
-<p>Sets the first-person recoil reduction amount. In the INI, 0.00 means maximum reduction and 0.50 means 50% reduction. The parent feature is currently marked broken.</p>
-</details>
+<p><strong><code>FirstPersonRecoilShakeAmplitudeScale</code></strong> — Sets the first-person recoil reduction amount. In the INI, 0.00 means maximum reduction and 0.50 means 50% reduction. The parent feature is currently marked broken.</p>
 
 </details>
 
@@ -409,40 +205,19 @@ Every option below uses the same name and order as the `FusionFixRDR2.ini` file.
 
 <p><em>The first four audio fixes do not have descriptions in the current INI, so their explanations are based on the option names.</em></p>
 
-<details>
-<summary><code>FixAmbientAudioDropouts</code></summary>
-<p>Intended to stop ambient sounds from unexpectedly cutting out.</p>
-</details>
+<p><strong><code>FixAmbientAudioDropouts</code></strong> — Intended to stop ambient sounds from unexpectedly cutting out.</p>
 
-<details>
-<summary><code>FixWeatherAudioTransitions</code></summary>
-<p>Intended to make audio transitions between weather conditions more consistent.</p>
-</details>
+<p><strong><code>FixWeatherAudioTransitions</code></strong> — Intended to make audio transitions between weather conditions more consistent.</p>
 
-<details>
-<summary><code>FixInteriorAudioOcclusion</code></summary>
-<p>Intended to address how ambient sound is muffled or blocked inside interiors.</p>
-</details>
+<p><strong><code>FixInteriorAudioOcclusion</code></strong> — Intended to address how ambient sound is muffled or blocked inside interiors.</p>
 
-<details>
-<summary><code>FixAmbientAudioLoops</code></summary>
-<p>Intended to fix problems with repeating ambient sound loops.</p>
-</details>
+<p><strong><code>FixAmbientAudioLoops</code></strong> — Intended to fix problems with repeating ambient sound loops.</p>
 
-<details>
-<summary><code>DisableAmbientMusic</code></summary>
-<p>Turns off the background music that plays while exploring.</p>
-</details>
+<p><strong><code>DisableAmbientMusic</code></strong> — Turns off the background music that plays while exploring.</p>
 
-<details>
-<summary><code>DisableCombatMusic</code></summary>
-<p>Turns off music that starts during combat.</p>
-</details>
+<p><strong><code>DisableCombatMusic</code></strong> — Turns off music that starts during combat.</p>
 
-<details>
-<summary><code>DisableWantedMusic</code></summary>
-<p>Turns off music that plays while you are wanted.</p>
-</details>
+<p><strong><code>DisableWantedMusic</code></strong> — Turns off music that plays while you are wanted.</p>
 
 </details>
 
@@ -451,24 +226,14 @@ Every option below uses the same name and order as the `FusionFixRDR2.ini` file.
 
 <p><em>These diagnostic settings are not described in the current INI. Their purposes are inferred from their names.</em></p>
 
-<details>
-<summary><code>DumpNativeHashes</code></summary>
-<p>Diagnostic option for dumping native hashes.</p>
-</details>
+<p><strong><code>DumpNativeHashes</code></strong> — Diagnostic option for dumping native hashes.</p>
 
-<details>
-<summary><code>CrashDiagnostics</code></summary>
-<p>Diagnostic option related to crashes.</p>
-</details>
+<p><strong><code>CrashDiagnostics</code></strong> — Diagnostic option related to crashes.</p>
 
-<details>
-<summary><code>DetectConflictingPatches</code></summary>
-<p>Diagnostic option for checking for potentially conflicting patches.</p>
-</details>
+<p><strong><code>DetectConflictingPatches</code></strong> — Diagnostic option for checking for potentially conflicting patches.</p>
 
 </details>
 
-</details>
 
 ### Requirements
 - [**Latest ASI loader**](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases) (preferably dinput8.dll)
