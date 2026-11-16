@@ -447,7 +447,7 @@ Every option below uses the same name and order as the `FusionFixRDR2.ini` file.
 </details>
 
 <details>
-<summary><strong>Diagnostics</strong> (3 options)</summary>
+<summary><strong>Diagnostics</strong></summary>
 
 <p><em>These diagnostic settings are not described in the current INI. Their purposes are inferred from their names.</em></p>
 
