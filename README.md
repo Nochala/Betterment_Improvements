@@ -23,17 +23,17 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 
 ### Credits
 **Special thanks to the following developers and projects for their work, research, and resources that have helped with the development of Fusion Fix RDR2.**
-- ThirteenAG - For GTA IV Fusion Fix, the main inspiration behind this project.
+- [ThirteenAG](https://github.com/ThirteenAG) - For GTA IV Fusion Fix, the main inspiration behind this project.
 
-- alloc8or - For RDR2 native documentation and reverse-engineering resources.
+- [alloc8or](https://github.com/alloc8or) - For RDR2 native documentation and reverse-engineering resources.
 
-- Chiheb-Bacha - For open-source RDR2 modding tools and engine research.
+- [Chiheb-Bacha](https://github.com/Chiheb-Bacha) - For open-source RDR2 modding tools and engine research.
 
-- baldurk - For developing RenderDoc, an invaluable tool for graphics and shader debugging.
+- [baldurk](https://github.com/Chiheb-Bacha) - For developing RenderDoc, an invaluable tool for graphics and shader debugging.
 
-- Alexander Blade - For developing ScriptHookRDR2 and making native scripting possible.
+- [Alexander Blade](https://x.com/Alexander_Blade) - For developing ScriptHookRDR2 and making native scripting possible.
 
-- CitizenFX developers - For their open-source work on RedM and the RDR2 engine documentation.
+- [CitizenFX developers](https://github.com/citizenfx) - For their open-source work on RedM and the RDR2 engine documentation.
 ---
 ### License 
 
