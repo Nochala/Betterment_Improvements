@@ -30,7 +30,7 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 
 - [**Chiheb-Bacha**](https://github.com/Chiheb-Bacha) - For open-source RDR2 modding tools and engine research.
 
-- [**baldurk**](https://github.com/Chiheb-Bacha) - For developing RenderDoc, an invaluable tool for graphics and shader debugging.
+- [**baldurk**](https://github.com/Chiheb-Bacha) - For developing RenderDoc.
 
 - [**Alexander Blade**](https://x.com/Alexander_Blade) - For developing ScriptHookRDR2 and making native scripting possible.
 
