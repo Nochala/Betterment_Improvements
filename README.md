@@ -14,90 +14,88 @@ The options below are listed in the same order as `FusionFixRDR2.ini`. Expand a 
 <details>
 <summary><strong>General</strong></summary>
 
-<p><strong><code>Enabled</code></strong> — Turns Fusion Fix RDR2 on or off without needing to remove the mod.</p>
+<p><strong><code>Enabled</code></strong> - Turns Fusion Fix RDR2 on or off without needing to remove the mod.</p>
 
-<p><strong><code>SettingsMenu</code></strong> — Adds Fusion Fix Settings under Settings → General so you can change the mod’s options in-game.</p>
+<p><strong><code>SettingsMenu</code></strong> - Adds Fusion Fix Settings under Settings → General so you can change the mod’s options in-game.</p>
 
-<p><strong><code>Logging</code></strong> — Enables the mod’s regular log output.</p>
+<p><strong><code>Logging</code></strong> - Enables the mod’s regular log output.</p>
 
-<p><strong><code>DebugLogging</code></strong> — Enables extra debug logging for troubleshooting.</p>
+<p><strong><code>DebugLogging</code></strong> - Enables extra debug logging for troubleshooting.</p>
 
 </details>
 
 <details>
 <summary><strong>Startup</strong></summary>
 
-<p><strong><code>SkipIntroSplashes</code></strong> — Skips the Rockstar intro splash when starting the game.</p>
+<p><strong><code>SkipIntroSplashes</code></strong> - Skips the Rockstar intro splash when starting the game.</p>
 
-<p><strong><code>SkipLegal</code></strong> — Skips the legal notices shown during startup.</p>
+<p><strong><code>SkipLegal</code></strong> - Skips the legal notices shown during startup.</p>
 
-<p><strong><code>StraightToStoryMode</code></strong> — Loads straight into Story Mode instead of stopping at the main menu.</p>
+<p><strong><code>StraightToStoryMode</code></strong> - Loads straight into Story Mode instead of stopping at the main menu.</p>
 
 </details>
 
 <details>
 <summary><strong>Engine</strong></summary>
 
-<p><em>The SSR settings at the bottom of this section are experimental, currently buggy, and only described as working with Vulkan.</em></p>
+<p><strong><code>YTDCrashFix</code></strong> - Fixes crashes related to YTD texture files.</p>
 
-<p><strong><code>YTDCrashFix</code></strong> — Fixes crashes related to YTD texture files.</p>
+<p><strong><code>ExtendHeapLimits</code></strong> - Raises the engine’s heap memory limit to help avoid allocation failures.</p>
 
-<p><strong><code>ExtendHeapLimits</code></strong> — Raises the engine’s heap memory limit to help avoid allocation failures.</p>
+<p><strong><code>ExtendPackfileLimits</code></strong> - Increases the number of packfiles the engine can handle, helping avoid loading failures and crashes.</p>
 
-<p><strong><code>ExtendPackfileLimits</code></strong> — Increases the number of packfiles the engine can handle, helping avoid loading failures and crashes.</p>
+<p><strong><code>ExtendStreamingPools</code></strong> - Raises streaming pool limits to help prevent crashes and other problems when those pools fill up.</p>
 
-<p><strong><code>ExtendStreamingPools</code></strong> — Raises streaming pool limits to help prevent crashes and other problems when those pools fill up.</p>
+<p><strong><code>ExtendAssetPools</code></strong> - Raises asset pool limits to improve stability and help reduce texture pop-in.</p>
 
-<p><strong><code>ExtendAssetPools</code></strong> — Raises asset pool limits to improve stability and help reduce texture pop-in.</p>
+<p><strong><code>OptimizeStreamingMemory</code></strong> - Improves how streaming memory is allocated to reduce overhead and smooth out frametimes.</p>
 
-<p><strong><code>OptimizeStreamingMemory</code></strong> — Improves how streaming memory is allocated to reduce overhead and smooth out frametimes.</p>
+<p><strong><code>TextureStreamingStutterFix</code></strong> - Reduces stuttering tied to texture streaming and asset loading.</p>
 
-<p><strong><code>TextureStreamingStutterFix</code></strong> — Reduces stuttering tied to texture streaming and asset loading.</p>
+<p><strong><code>ImproveTextureStreaming</code></strong> - Expands streaming read buffers to help prevent delays when loading assets in demanding areas. Separate from TextureStreamingStutterFix.</p>
 
-<p><strong><code>ImproveTextureStreaming</code></strong> — Expands streaming read buffers to help prevent delays when loading assets in demanding areas. Separate from TextureStreamingStutterFix.</p>
+<p><strong><code>ExtendPedMemoryLimits</code></strong> - Raises pedestrian memory limits to reduce NPC pop-in and keep population streaming more consistent.</p>
 
-<p><strong><code>ExtendPedMemoryLimits</code></strong> — Raises pedestrian memory limits to reduce NPC pop-in and keep population streaming more consistent.</p>
+<h4>Experimental</h4>
 
-<h4>Experimental - work in progress</h4>
+<p><strong><code>ExpandSSRCoverage</code></strong> - Experimental attempt to extend screen-space reflection coverage using FOV and shader changes. Currently buggy and Vulkan-only.</p>
 
-<p><strong><code>ExpandSSRCoverage</code></strong> — Experimental attempt to extend screen-space reflection coverage using FOV and shader changes. Currently buggy and Vulkan-only.</p>
+<p><strong><code>SSROverscanScale</code></strong> - Adjusts the overscan scale used by the experimental screen-space reflection feature.</p>
 
-<p><strong><code>SSROverscanScale</code></strong> — Adjusts the overscan scale used by the experimental screen-space reflection feature.</p>
-
-<p><strong><code>SSROverscanTestMode</code></strong> — Selects the test mode for the experimental screen-space reflection feature. Test modes are not described in the current INI.</p>
+<p><strong><code>SSROverscanTestMode</code></strong> - Selects the test mode for the experimental screen-space reflection feature. Test modes are not described in the current INI.</p>
 
 </details>
 
 <details>
 <summary><strong>Gameplay</strong></summary>
 
-<p><strong><code>DisableAutoAmmoPickup</code></strong> — Stops ammo from being picked up automatically from bodies and dropped weapons.</p>
+<p><strong><code>DisableAutoAmmoPickup</code></strong> - Stops ammo from being picked up automatically from bodies and dropped weapons.</p>
 
-<p><strong><code>DisableAutoHorseEquip</code></strong> — Stops the game from automatically equipping weapons when you dismount during missions.</p>
+<p><strong><code>DisableAutoHorseEquip</code></strong> - Stops the game from automatically equipping weapons when you dismount during missions.</p>
 
-<p><strong><code>DisableAutoHorseHolster</code></strong> — Keeps the game from automatically holstering your weapons while riding.</p>
+<p><strong><code>DisableAutoHorseHolster</code></strong> - Keeps the game from automatically holstering your weapons while riding.</p>
 
-<p><strong><code>DisableOutOfBoundSnipers</code></strong> — Removes the invisible snipers that kill you when entering certain restricted or out-of-bounds areas.</p>
+<p><strong><code>DisableOutOfBoundSnipers</code></strong> - Removes the invisible snipers that kill you when entering certain restricted or out-of-bounds areas.</p>
 
 <h4>Honor</h4>
 
-<p><strong><code>DisableHonorLossWhenMasked</code></strong> — Prevents honor loss from crimes committed while wearing a mask or face covering.</p>
+<p><strong><code>DisableHonorLossWhenMasked</code></strong> - Prevents honor loss from crimes committed while wearing a mask or face covering.</p>
 
-<p><strong><code>DisableBodySearchHonorLoss</code></strong> — Stops you from losing honor when searching dead bodies.</p>
+<p><strong><code>DisableBodySearchHonorLoss</code></strong> - Stops you from losing honor when searching dead bodies.</p>
 
-<p><strong><code>DisableAntagonizehHonorLoss</code></strong> — Stops antagonizing NPCs from lowering your honor.</p>
+<p><strong><code>DisableAntagonizehHonorLoss</code></strong> - Stops antagonizing NPCs from lowering your honor.</p>
 
-<p><strong><code>FixSelfDefenseHonorLoss</code></strong> — Prevents honor loss for defending yourself against someone who attacked first.</p>
+<p><strong><code>FixSelfDefenseHonorLoss</code></strong> - Prevents honor loss for defending yourself against someone who attacked first.</p>
 
-<p><strong><code>DisableHonorSystem</code></strong> — Freezes your current honor level so it can no longer go up or down.</p>
+<p><strong><code>DisableHonorSystem</code></strong> - Freezes your current honor level so it can no longer go up or down.</p>
 
 <h4>Bounty</h4>
 
-<p><strong><code>DisableBountyWhenMasked</code></strong> — Prevents bounties from being issued for crimes committed while masked.</p>
+<p><strong><code>DisableBountyWhenMasked</code></strong> - Prevents bounties from being issued for crimes committed while masked.</p>
 
-<p><strong><code>FixSelfDefenseBounties</code></strong> — Prevents bounties for defending yourself against someone who attacked first.</p>
+<p><strong><code>FixSelfDefenseBounties</code></strong> - Prevents bounties for defending yourself against someone who attacked first.</p>
 
-<p><strong><code>DisableBounties</code></strong> — Prevents new bounties while keeping the wanted system active.</p>
+<p><strong><code>DisableBounties</code></strong> - Prevents new bounties while keeping the wanted system active.</p>
 
 <h4>Horse</h4>
 
