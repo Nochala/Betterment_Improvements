@@ -6,8 +6,8 @@
 
 A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG. The goal of this mod is to address Red Dead Redemption II engine limitations and performance issues while also introducing a wide range of gameplay improvements and quality-of-life features. 
 
-
-## Features
+---
+### Features
 - **See the [full feature list wiki](https://github.com/Nochala/Fusion_Fix_RDR2/wiki/Full-Feature-List) for all available options.**
 - **All features can be individually enabled or disabled through the `INI` fle or the in-game Fusion Fix Settings menu.**
 - **Many features replace & overlap other mods. If you prefer another mod's implementation, simply disable the corresponding feature in Fusion Fix.**
@@ -16,12 +16,12 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 - [**Latest ASI loader**](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases) (preferably dinput8.dll)
 - [**Latest ScriptHookRDR2**](https://www.dev-c.com/rdr2/scripthookrdr2/)
 
-## Known Issues
+### Known Issues
 
 **Fusion Fix is still a work in progress. Some features are experimental and may not work correctly.**
 
 
-## Credits
+### Credits
 **Special thanks to the following developers and projects for their work, research, and resources that have helped with the development of Fusion Fix RDR2.**
 - ThirteenAG - For GTA IV Fusion Fix, the main inspiration behind this project.
 
@@ -34,7 +34,7 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 - Alexander Blade - For developing ScriptHookRDR2 and making native scripting possible.
 
 - CitizenFX developers - For their open-source work on RedM and the RDR2 engine documentation.
-  
+---
 ### License 
 
 Fusion Fix RDR2 is licensed under the GNU General Public License v3.0 (GPL-3.0).
