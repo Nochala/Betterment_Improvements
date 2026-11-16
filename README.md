@@ -114,8 +114,8 @@ The options below are listed in the same order as `FusionFixRDR2.ini`. Expand a 
 <p><strong><code>DisableWeaponWheelFilter</code></strong> - Removes the screen filter shown while the weapon wheel is open.</p>
 <p><strong><code>DisableLowHealthFilter</code></strong> - Removes the visual effects that appear when your health is critically low.</p>
 </details>
+
 <details>
-  
 <summary><strong>Ambience</strong></summary>
 <p><strong><code>FixAmbientAudioDropouts</code></strong> - Intended to stop ambient sounds from unexpectedly cutting out.</p>
 <p><strong><code>FixWeatherAudioTransitions</code></strong> - Intended to make audio transitions between weather conditions more consistent.</p>
