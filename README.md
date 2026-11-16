@@ -125,17 +125,12 @@ The options below are listed in the same order as `FusionFixRDR2.ini`. Expand a 
 <p><strong><code>DisableCombatMusic</code></strong> - Turns off music that starts during combat.</p>
 <p><strong><code>DisableWantedMusic</code></strong> - Turns off music that plays while you are wanted.</p>
 </details>
+
 <details>
 <summary><strong>Diagnostics</strong></summary>
-
-<p><em>These diagnostic settings are not described in the current INI. Their purposes are inferred from their names.</em></p>
-
 <p><strong><code>DumpNativeHashes</code></strong> — Diagnostic option for dumping native hashes.</p>
-
 <p><strong><code>CrashDiagnostics</code></strong> — Diagnostic option related to crashes.</p>
-
 <p><strong><code>DetectConflictingPatches</code></strong> — Diagnostic option for checking for potentially conflicting patches.</p>
-
 </details>
 
 
