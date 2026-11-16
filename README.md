@@ -24,7 +24,9 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 
 - [**alloc8or**](https://github.com/alloc8or) - For RDR2 native documentation and reverse-engineering resources.
 
-- [C**hiheb-Bacha**](https://github.com/Chiheb-Bacha) - For open-source RDR2 modding tools and engine research.
+- [**Halen84**](https://github.com/Halen84) - For RDR2-Native-Menu-Base
+
+- [**Chiheb-Bacha**](https://github.com/Chiheb-Bacha) - For open-source RDR2 modding tools and engine research.
 
 - [**baldurk**](https://github.com/Chiheb-Bacha) - For developing RenderDoc, an invaluable tool for graphics and shader debugging.
 
