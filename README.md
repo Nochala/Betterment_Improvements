@@ -8,8 +8,7 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 
 
 ## Features
-See the [full feature list](https://github.com/Nochala/Fusion_Fix_RDR2/wiki/Full-Feature-List) for all available options and what they do.
-
+**See the [full feature list wiki](https://github.com/Nochala/Fusion_Fix_RDR2/wiki/Full-Feature-List) for all available options.**
 
 ### Requirements
 - [**Latest ASI loader**](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases) (preferably dinput8.dll)
