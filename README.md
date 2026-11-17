@@ -20,28 +20,28 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 
 ### Credits
 **Special thanks to the following developers and projects for their work, research, and resources that have helped with the development of Fusion Fix RDR2.**
-- [**ThirteenAG**](https://github.com/ThirteenAG) - For GTA IV Fusion Fix, the main inspiration behind this project.
+- [**ThirteenAG**](https://github.com/ThirteenAG) **-** _For GTA IV Fusion Fix, the main inspiration behind this project._
 
-- [**alloc8or**](https://github.com/alloc8or) - For RDR2 native documentation and reverse-engineering resources.
+- [**alloc8or**](https://github.com/alloc8or) **-** _For RDR2 native documentation and reverse-engineering resources._
 
-- [**Halen84**](https://github.com/Halen84) - For RDR2-Native-Menu-Base source.
+- [**Halen84**](https://github.com/Halen84) **-** _For RDR2-Native-Menu-Base source._
  
-- [**Shtivi**](https://github.com/Shtivi) - For their RDR2-DualSense source. 
+- [**Shtivi**](https://github.com/Shtivi) **-** _For their RDR2-DualSense source. _
 
-- [**Chiheb-Bacha**](https://github.com/Chiheb-Bacha) - For open-source RDR2 modding tools and engine research.
+- [**Chiheb-Bacha**](https://github.com/Chiheb-Bacha) **-** _For open-source RDR2 modding tools and engine research._
 
-- [**baldurk**](https://github.com/Chiheb-Bacha) - For developing RenderDoc.
+- [**baldurk**](https://github.com/Chiheb-Bacha) **-** _For developing RenderDoc._
 
-- [**Alexander Blade**](https://x.com/Alexander_Blade) - For developing ScriptHookRDR2 and making native scripting possible.
+- [**Alexander Blade**](https://x.com/Alexander_Blade) **-** _For developing ScriptHookRDR2 and making native scripting possible._
 
-- [**CitizenFX developers**](https://github.com/citizenfx) - For their open-source work on RedM and the RDR2 engine documentation.
+- [**CitizenFX developers**](https://github.com/citizenfx) **-** _For their open-source work on RedM and the RDR2 engine documentation._
 ---
 ### License 
 
-Fusion Fix RDR2 is licensed under the GNU General Public License v3.0 (GPL-3.0).
+_Fusion Fix RDR2 is licensed under the GNU General Public License v3.0 (GPL-3.0)._
 
-Copyright © 2026 Nochala.
+_Copyright © 2026 Nochala._
 
-You are free to view, modify, and redistribute the source code in accordance with the GPL-3.0 license.
+_You are free to view, modify, and redistribute the source code in accordance with the GPL-3.0 license._
 
-All redistributed versions must preserve the original copyright and licensing notices. Modified versions must clearly indicate that changes have been made and comply with the GPL-3.0 license.
+_All redistributed versions must preserve the original copyright and licensing notices. Modified versions must clearly indicate that changes have been made and comply with the GPL-3.0 license._
