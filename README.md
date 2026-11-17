@@ -18,8 +18,10 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 - [**Latest ScriptHookRDR2**](https://www.dev-c.com/rdr2/scripthookrdr2/)
 
 
+**Download this projects build from [Releases.](https://github.com/Nochala/Fusion_Fix_RDR2/releases)**
+---
+
 ### Credits
-**Special thanks to the following developers and projects for their work, research, and resources that have helped with the development of Fusion Fix RDR2.**
 - [**ThirteenAG**](https://github.com/ThirteenAG) **-** _For GTA IV Fusion Fix, the main inspiration behind this project._
 
 - [**alloc8or**](https://github.com/alloc8or) **-** _For RDR2 native documentation and reverse-engineering resources._
