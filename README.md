@@ -26,7 +26,7 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 
 - [**Halen84**](https://github.com/Halen84) **-** _For RDR2-Native-Menu-Base source._
  
-- [**Shtivi**](https://github.com/Shtivi) **-** _For their RDR2-DualSense source. _
+- [**Shtivi**](https://github.com/Shtivi) **-** _For their RDR2-DualSense source._
 
 - [**Chiheb-Bacha**](https://github.com/Chiheb-Bacha) **-** _For open-source RDR2 modding tools and engine research._
 
