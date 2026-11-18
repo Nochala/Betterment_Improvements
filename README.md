@@ -1,4 +1,4 @@
-# Fusion Fix Red Dead Redemption II
+# Betterment Improvements for Red Dead Redemption II
 ![Language](https://img.shields.io/badge/LANGUAGE-C%23-239120?logo=csharp&logoColor=white)
 [![Latest Release](https://badgen.net/github/tag/Nochala/RDR2_Fusion_Fix?label=Version&color=blue)](https://github.com/Nochala/RDR2_Fusion_Fix/releases/latest)
 [![Last Commit](https://badgen.net/github/last-commit/Nochala/RDR2_Fusion_Fix?label=Last%20Commit&color=purple)](https://github.com/Nochala/RDR2_Fusion_Fix/commits/main)
@@ -8,9 +8,9 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 
 ---
 ### Features
-- **See the [full feature list wiki](https://github.com/Nochala/Fusion_Fix_RDR2/wiki/Full-Feature-List) for all available options.**
+- **See the [full feature list wiki](https://github.com/Nochala/Betterment_Improvements/wiki/Full-Feature-List) for all available options.**
 - **All features can be individually enabled or disabled through the `INI` fle or the in-game Fusion Fix Settings menu.**
-- **Many features replace & overlap other mods. If you prefer another mod's implementation, simply disable the corresponding feature in Fusions Fix RDR2 INI file or the in-game Fusion Fix Settings menu.**
+- **Many features replace & overlap other mods. If you prefer another mod's implementation, simply disable the corresponding feature in `BettermentImprovements.ini` file or the in-game settings menu.**
 - **Development is still work in progress, some features are experimental.**
 
 ### Requirements
@@ -18,14 +18,14 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 - [**Latest ScriptHookRDR2**](https://www.dev-c.com/rdr2/scripthookrdr2/)
 
 
-#### **Download this projects build from [Releases.](https://github.com/Nochala/Fusion_Fix_RDR2/releases)**
+#### **Download this projects build from [Releases.](https://github.com/Nochala/Betterment_Improvements/releases)**
 
 #### **Official mod page hosted on:** [**Nexus Mods**](https://www.nexusmods.com/reddeadredemption2/mods/11521)
 
 ---
 
 ### Credits
-- [**ThirteenAG**](https://github.com/ThirteenAG) **-** _For GTA IV Fusion Fix, the main inspiration behind this project._
+- [**ThirteenAG**](https://github.com/ThirteenAG) **-** _For inspiration behind this project._
 
 - [**alloc8or**](https://github.com/alloc8or) **-** _For RDR2 native documentation and reverse-engineering resources._
 
@@ -43,7 +43,7 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 ---
 ### License 
 
-_Fusion Fix RDR2 is licensed under the GNU General Public License v3.0 (GPL-3.0)._
+_Betterment Improvements RDR2 is licensed under the GNU General Public License v3.0 (GPL-3.0)._
 
 _Copyright © 2026 Nochala._
 
