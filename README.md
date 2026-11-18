@@ -1,7 +1,7 @@
 # Betterment Improvements for RDR2
 ![Language](https://img.shields.io/badge/LANGUAGE-C%23-239120?logo=csharp&logoColor=white)
-[![Latest Release](https://badgen.net/github/tag/Nochala/RDR2_Fusion_Fix?label=Version&color=blue)](https://github.com/Nochala/RDR2_Fusion_Fix/releases/latest)
-[![Last Commit](https://badgen.net/github/last-commit/Nochala/RDR2_Fusion_Fix?label=Last%20Commit&color=purple)](https://github.com/Nochala/RDR2_Fusion_Fix/commits/main)
+[![Latest Release](https://badgen.net/github/tag/Nochala/Betterment_Improvements?label=Version&color=blue)](https://github.com/Nochala/Betterment_Improvements/releases/latest)
+[![Last Commit](https://badgen.net/github/last-commit/Nochala/Betterment_Improvements?label=Last%20Commit&color=purple)](https://github.com/Nochala/Betterment_Improvements/commits/main)
 ![Status](https://badgen.net/badge/Status/WIP/orange)
 
 A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG. The goal of this mod is to address Red Dead Redemption II engine limitations and performance issues while also introducing a wide range of gameplay improvements and quality-of-life features. 
