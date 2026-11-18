@@ -18,7 +18,10 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 - [**Latest ScriptHookRDR2**](https://www.dev-c.com/rdr2/scripthookrdr2/)
 
 
-**Download this projects build from [Releases.](https://github.com/Nochala/Fusion_Fix_RDR2/releases)**
+#### **Download this projects build from [Releases.](https://github.com/Nochala/Fusion_Fix_RDR2/releases)**
+
+#### **Official mod page hosted on:** [**Nexus Mods**](https://www.nexusmods.com/reddeadredemption2/mods/11521)
+
 ---
 
 ### Credits
@@ -47,3 +50,4 @@ _Copyright © 2026 Nochala._
 _You are free to view, modify, and redistribute the source code in accordance with the GPL-3.0 license._
 
 _All redistributed versions must preserve the original copyright and licensing notices. Modified versions must clearly indicate that changes have been made and comply with the GPL-3.0 license._
+
