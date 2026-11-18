@@ -25,8 +25,6 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 ---
 
 ### Credits
-- [**ThirteenAG**](https://github.com/ThirteenAG) **-** _For inspiration behind this project._
-
 - [**alloc8or**](https://github.com/alloc8or) **-** _For RDR2 native documentation and reverse-engineering resources._
 
 - [**Halen84**](https://github.com/Halen84) **-** _For RDR2-Native-Menu-Base source._
