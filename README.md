@@ -10,7 +10,7 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 ### Features
 - **See the [full feature list wiki](https://github.com/Nochala/Fusion_Fix_RDR2/wiki/Full-Feature-List) for all available options.**
 - **All features can be individually enabled or disabled through the `INI` fle or the in-game Fusion Fix Settings menu.**
-- **Many features replace & overlap other mods. If you prefer another mod's implementation, simply disable the corresponding feature in Fusion Fix.**
+- **Many features replace & overlap other mods. If you prefer another mod's implementation, simply disable the corresponding feature in Fusions Fix RDR2 INI file or the in-game Fusion Fix Settings menu.**
 - **Development is still work in progress, some features are experimental.**
 
 ### Requirements
