@@ -18,6 +18,7 @@ namespace
     constexpr std::uint64_t getGameTimer = 0x4F67E8ECA7D3F667ULL;
     constexpr std::uint64_t doesEntityExist = 0xD42BD6EB2E0F1677ULL;
     constexpr std::uint64_t isControlPressed = 0xF3A21BCD95725A4AULL;
+    constexpr std::uint64_t isPedReloading = 0x24B100C68C645951ULL;
     constexpr std::uint64_t setArrowTrailFx = 0x2EBF70E1D8C06683ULL;
     constexpr std::uint64_t getHashKey = 0xFD340785ADF8CFB7ULL;
     constexpr std::uint64_t getRunningScriptThreads = 0x8E34C953364A76DDULL;
@@ -42,7 +43,8 @@ namespace
     constexpr std::uint64_t getAmmoTypeForWeapon = 0x5C2EA6C44F515F34ULL;
     constexpr std::uint32_t reticleResetFlag = 293;
     constexpr std::uint32_t reticleSwayResetFlag = 294;
-    constexpr std::uint32_t disabledArrowTrailFx = 0xB88046AAU;
+    constexpr std::uint32_t disabledArrowTrailFx = 0x34E12A73U;
+    constexpr std::uint32_t defaultArrowTrailFx = 0xB88046AAU;
     constexpr std::uint32_t reloadControl = 0xE30CD707;
     constexpr std::uint32_t aimControl = 0xF84FA74FU;
     constexpr std::uint32_t scopeToggleControl = 0x3076E97CU;
@@ -189,7 +191,7 @@ namespace
     bool deadEyeAutoReloadDisabled = false;
     bool emptyAutoReloadDisabled = false;
     bool arrowTrailsDisabled = false;
-    ULONGLONG nextArrowTrailRefresh = 0;
+    bool arrowTrailFxApplied = false;
     bool reticleSpreadDisabled = false;
     bool reticleSwayDisabled = false;
     bool forcedScopeProbeEnabled = false;
@@ -279,6 +281,8 @@ namespace
     std::atomic<bool> emptyReloadSuppressionObserved{ false };
     bool emptyReloadSuppressionLogged = false;
     std::atomic<ULONGLONG> manualReloadAllowedUntil{ 0 };
+    ULONGLONG nextManualReloadPoll = 0;
+    ULONGLONG nextManualReloadStateCheck = 0;
     thread_local unsigned automaticReloadDepth = 0;
     std::atomic<std::uintptr_t> playerAddress{ 0 };
     ULONGLONG nextPlayerRefresh = 0;
@@ -1121,26 +1125,49 @@ namespace
         }
     }
 
-    void UpdateArrowTrails()
+    bool IsArrowTrailWorldReady()
     {
-        if (!arrowTrailsDisabled)
-            return;
-        const ULONGLONG now = GetTickCount64();
-        if (now < nextArrowTrailRefresh)
-            return;
-        nextArrowTrailRefresh = now + 500;
+        nativeInit(getLoadingScreenActive);
+        if (*nativeCall() != 0)
+            return false;
+        nativeInit(playerPedId);
+        const int player = static_cast<int>(*nativeCall());
+        if (!player)
+            return false;
+        nativeInit(doesEntityExist);
+        nativePush64(static_cast<std::uint32_t>(player));
+        return *nativeCall() != 0;
+    }
 
-        int peds[1024] = {};
+    bool ApplyArrowTrailFx(std::uint32_t fx)
+    {
+        int peds[1024];
         const int count = worldGetAllPeds(peds, 1024);
+        bool applied = false;
         for (int i = 0; i < count && i < 1024; ++i)
         {
-            if (peds[i] == 0)
+            if (!peds[i])
                 continue;
+            if (fx == defaultArrowTrailFx)
+            {
+                nativeInit(doesEntityExist);
+                nativePush64(static_cast<std::uint32_t>(peds[i]));
+                if (*nativeCall() == 0)
+                    continue;
+            }
             nativeInit(setArrowTrailFx);
             nativePush64(static_cast<std::uint32_t>(peds[i]));
-            nativePush64(disabledArrowTrailFx);
+            nativePush64(fx);
             nativeCall();
+            applied = true;
         }
+        return applied;
+    }
+
+    void UpdateArrowTrails()
+    {
+        if (arrowTrailsDisabled && IsArrowTrailWorldReady())
+            arrowTrailFxApplied = ApplyArrowTrailFx(disabledArrowTrailFx) || arrowTrailFxApplied;
     }
 
     void RestoreReticleAccuracy(int ped)
@@ -3105,11 +3132,30 @@ namespace
         if (!emptyAutoReloadDisabled)
             return;
 
-        nativeInit(isControlPressed);
-        nativePush64(0);
-        nativePush64(reloadControl);
-        if (*nativeCall() != 0)
-            manualReloadAllowedUntil.store(GetTickCount64() + 1800, std::memory_order_relaxed);
+        const ULONGLONG now = GetTickCount64();
+        if (now >= nextManualReloadPoll)
+        {
+            nextManualReloadPoll = now + 16;
+            nativeInit(isControlPressed);
+            nativePush64(0);
+            nativePush64(reloadControl);
+            if (static_cast<std::uint32_t>(*nativeCall()) != 0)
+                manualReloadAllowedUntil.store(now + 1800, std::memory_order_relaxed);
+            else if (now < manualReloadAllowedUntil.load(std::memory_order_relaxed) &&
+                now >= nextManualReloadStateCheck)
+            {
+                nextManualReloadStateCheck = now + 100;
+                nativeInit(playerPedId);
+                const int ped = static_cast<int>(*nativeCall());
+                if (ped)
+                {
+                    nativeInit(isPedReloading);
+                    nativePush64(static_cast<std::uint32_t>(ped));
+                    if (static_cast<std::uint32_t>(*nativeCall()) != 0)
+                        manualReloadAllowedUntil.store(now + 500, std::memory_order_relaxed);
+                }
+            }
+        }
 
         if (emptyReloadSuppressionObserved.load(std::memory_order_relaxed) && !emptyReloadSuppressionLogged)
         {
@@ -3138,6 +3184,9 @@ namespace
 
     bool __fastcall ClipNeedsReloadHook(void* context, std::uint8_t requested)
     {
+        auto original = reinterpret_cast<bool(__fastcall*)(void*, std::uint8_t)>(clipNeedsReload.gateway);
+        if (!original || !original(context, requested))
+            return false;
         if (emptyAutoReloadDisabled && emptyAutoReloadHooksReady && automaticReloadDepth != 0 &&
             context && requested)
         {
@@ -3154,8 +3203,7 @@ namespace
                 }
             }
         }
-        auto original = reinterpret_cast<bool(__fastcall*)(void*, std::uint8_t)>(clipNeedsReload.gateway);
-        return original ? original(context, requested) : false;
+        return true;
     }
 
     void __fastcall HolsterHook(void* context)
@@ -3220,8 +3268,11 @@ namespace Main
             autoReloadDisabled = disableAutoReload;
             deadEyeAutoReloadDisabled = disableDeadEyeAutoReload;
             emptyAutoReloadDisabled = disableEmptyAutoReload;
+            if (arrowTrailsDisabled && !disableArrowTrails && arrowTrailFxApplied && IsArrowTrailWorldReady())
+                ApplyArrowTrailFx(defaultArrowTrailFx);
+            if (!disableArrowTrails)
+                arrowTrailFxApplied = false;
             arrowTrailsDisabled = disableArrowTrails;
-            nextArrowTrailRefresh = 0;
             if (arrowTrailsDisabled)
                 Logger::Log("[INFO] DisableArrowTrails: enabled.");
             RestoreReticleAccuracy(reticleAccuracyPed);
@@ -3373,6 +3424,8 @@ namespace Main
             emptyReloadSuppressionObserved.store(false, std::memory_order_relaxed);
             emptyReloadSuppressionLogged = false;
             manualReloadAllowedUntil.store(0, std::memory_order_relaxed);
+            nextManualReloadPoll = 0;
+            nextManualReloadStateCheck = 0;
             nextPlayerRefresh = 0;
             playerAddress.store(0, std::memory_order_relaxed);
             if (autoReloadDisabled || deadEyeAutoReloadDisabled || emptyAutoReloadDisabled)
@@ -3474,8 +3527,10 @@ namespace Main
             autoReloadDisabled = false;
             deadEyeAutoReloadDisabled = false;
             emptyAutoReloadDisabled = false;
+            if (arrowTrailsDisabled && arrowTrailFxApplied && IsArrowTrailWorldReady())
+                ApplyArrowTrailFx(defaultArrowTrailFx);
+            arrowTrailFxApplied = false;
             arrowTrailsDisabled = false;
-            nextArrowTrailRefresh = 0;
             reticleSpreadDisabled = false;
             reticleSwayDisabled = false;
             forcedScopeProbeEnabled = false;
@@ -3572,6 +3627,8 @@ namespace Main
             reticleAccuracyOverridden = false;
             emptyAutoReloadHooksReady = false;
             manualReloadAllowedUntil.store(0, std::memory_order_relaxed);
+            nextManualReloadPoll = 0;
+            nextManualReloadStateCheck = 0;
             playerAddress.store(0, std::memory_order_relaxed);
             RestoreHook(holster);
             RestoreHook(cover);

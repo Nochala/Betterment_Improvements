@@ -1000,7 +1000,6 @@ namespace Main
             settings.enabled && settings.disableDrunkFilter,
             settings.enabled && settings.disableEagleEyeFilter,
             settings.enabled && settings.disableDeadEyeFilter,
-            settings.enabled && settings.disablePauseMenuFilter,
             settings.enabled && settings.disableWeaponWheelFilter,
             settings.enabled && settings.disableLowHealthFilter,
             settings.enabled && settings.reduceWeaponRecoil, settings.recoilShakeAmplitudeScale,
@@ -1066,8 +1065,15 @@ namespace Main
         UpdateHonorEventFilters();
     }
 
-    void Update(const GameplayFixes::Settings&)
+    void Update(const GameplayFixes::Settings&, bool updateOther)
     {
+        if (!updateOther)
+        {
+            Horse::Update();
+            Player::Update();
+            Gunz::Update();
+            return;
+        }
         Lighting::Update();
         Camera::Update();
         WaterReflections::UpdateOverscanDiagnostics();

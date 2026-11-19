@@ -16,12 +16,13 @@ namespace
     constexpr std::uint64_t setPedResetFlag = 0xC1E8A365BF3B29F2ULL;
     constexpr int disableHorseAutoJumpFlag = 247;
     constexpr std::uint64_t doesEntityExist = 0xD42BD6EB2E0F1677ULL;
-    constexpr std::uint64_t setPedConfigFlag = 0x1913FE4CBF41C463ULL;
-    constexpr std::uint64_t getPedConfigFlag = 0x7EE53118C892B513ULL;
     constexpr std::uint64_t setForceAutoEquip = 0xBE711B14A159E84FULL;
     constexpr std::uint64_t setInstantlyStoreLongarmsOnDismount = 0xB832F1A686B9B810ULL;
     constexpr std::uint64_t getCurrentPedWeapon = 0x3A87E44BB9A01D54ULL;
     constexpr std::uint64_t setCurrentPedWeapon = 0xADF692B254977C0CULL;
+    constexpr std::uint64_t isWeaponTwoHanded = 0x0556E9D2ECF39D01ULL;
+    constexpr std::uint64_t isControlJustReleased = 0x50F940259D3841E6ULL;
+    constexpr std::uint64_t animpostfxIsRunning = 0x4A123E85D7C4CA0BULL;
     constexpr std::uint64_t getHashKey = 0xFD340785ADF8CFB7ULL;
     constexpr std::uint64_t isControlJustPressed = 0x580417101DDB492FULL;
     constexpr std::uint64_t isControlPressed = 0xF3A21BCD95725A4AULL;
@@ -60,9 +61,12 @@ namespace
     constexpr ULONGLONG horseHelpClearRepeatMs = 250;
     constexpr ULONGLONG horseWhistleHelpWindowMs = 1000;
     constexpr ULONGLONG horseDistantWhistleGraceMs = 15000;
-    constexpr ULONGLONG mountedWeaponRefreshMs = 100;
-    constexpr ULONGLONG mountedWeaponGraceMs = 5000;
-    constexpr int disablePlayerAutoHolsterFlag = 141;
+    constexpr ULONGLONG horseWeaponSampleMs = 100;
+    constexpr ULONGLONG horseWeaponInputMs = 50;
+    constexpr ULONGLONG horseWeaponStableMs = 5000;
+    constexpr ULONGLONG horseWeaponManualGraceMs = 5000;
+    constexpr ULONGLONG horseWeaponRestoreCooldownMs = 1200;
+    constexpr int horseWeaponPoints[] = { 0, 7, 8, 9, 10 };
 
     bool disableAutoEquip = false;
     bool disableAutoHolster = false;
@@ -101,21 +105,24 @@ namespace
     ULONGLONG lastHelpClearAt = 0;
     std::uint32_t lastClearedHelpMessage = 0;
     std::uint64_t lastPlayerPed = 0;
-    bool lastHolsterFlag = false;
-    bool holsterFlagChanged = false;
-    bool mountFlagCaptured = false;
     bool mounted = false;
     ULONGLONG recentDismountUntil = 0;
-    ULONGLONG nextWeaponRefresh = 0;
     std::uint32_t unarmedWeapon = 0;
-    std::uint32_t toggleHolsterControl = 0;
-    std::uint32_t openWeaponWheelControl = 0;
-    std::uint32_t nextWeaponControl = 0;
-    std::uint32_t previousWeaponControl = 0;
-    std::uint32_t selectNextWeaponControl = 0;
-    std::uint32_t selectPreviousWeaponControl = 0;
-    std::uint32_t horseAimControl = 0;
-    std::uint32_t horseAttackControl = 0;
+    std::uint32_t bowWeapon = 0;
+    std::uint32_t improvedBowWeapon = 0;
+    std::uint32_t wheelControl = 0;
+    std::uint32_t holsterControl = 0;
+    std::uint32_t trackedWeapons[5] = {};
+    ULONGLONG weaponChangedAt[5] = {};
+    unsigned char weaponRestoreAttempts[5] = {};
+    ULONGLONG nextWeaponSample = 0;
+    ULONGLONG nextWeaponInputCheck = 0;
+    ULONGLONG mountedSince = 0;
+    ULONGLONG manualHolsterGraceUntil = 0;
+    ULONGLONG lastWeaponRestore = 0;
+    bool weaponTrackingReady = false;
+    bool weaponSnapshotLogged = false;
+    std::uint32_t lastReportedWeapons[5] = {};
 
     std::uint32_t HashName(const char* value)
     {
@@ -144,6 +151,214 @@ namespace
         return static_cast<std::uint32_t>(*nativeCall()) != 0;
     }
 
+    bool JustReleased(std::uint32_t control)
+    {
+        if (control == 0)
+            return false;
+        nativeInit(isControlJustReleased);
+        nativePush64(0);
+        nativePush64(control);
+        return static_cast<std::uint32_t>(*nativeCall()) != 0;
+    }
+
+    void ResetWeaponTracking()
+    {
+        for (int i = 0; i < 5; ++i)
+        {
+            trackedWeapons[i] = 0;
+            weaponChangedAt[i] = 0;
+            weaponRestoreAttempts[i] = 0;
+            lastReportedWeapons[i] = 0;
+        }
+        nextWeaponSample = 0;
+        nextWeaponInputCheck = 0;
+        mountedSince = 0;
+        manualHolsterGraceUntil = 0;
+        lastWeaponRestore = 0;
+        weaponTrackingReady = false;
+        weaponSnapshotLogged = false;
+    }
+
+    std::uint32_t ReadWeaponSlot(std::uint64_t ped, int attachPoint)
+    {
+        std::uint32_t weapon = 0;
+        nativeInit(getCurrentPedWeapon);
+        nativePush64(ped);
+        nativePush64(reinterpret_cast<std::uint64_t>(&weapon));
+        nativePush64(0);
+        nativePush64(static_cast<std::uint64_t>(attachPoint));
+        nativePush64(0);
+        nativeCall();
+        return weapon;
+    }
+
+    bool IsLongarm(std::uint32_t weapon)
+    {
+        if (weapon == 0 || weapon == unarmedWeapon)
+            return false;
+        if (weapon == bowWeapon || weapon == improvedBowWeapon)
+            return true;
+        nativeInit(isWeaponTwoHanded);
+        nativePush64(weapon);
+        return static_cast<std::uint32_t>(*nativeCall()) != 0;
+    }
+
+    bool WeaponWheelActive()
+    {
+        nativeInit(animpostfxIsRunning);
+        nativePush64(reinterpret_cast<std::uint64_t>("WheelHUDIn"));
+        return static_cast<std::uint32_t>(*nativeCall()) != 0;
+    }
+
+    bool InvokeBoolean(std::uint64_t hash)
+    {
+        nativeInit(hash);
+        return static_cast<std::uint32_t>(*nativeCall()) != 0;
+    }
+
+    std::uint32_t InvokeInt(std::uint64_t hash, std::uint64_t value)
+    {
+        nativeInit(hash);
+        nativePush64(value);
+        return static_cast<std::uint32_t>(*nativeCall());
+    }
+
+    void UpdateWeaponTracking(std::uint64_t ped, ULONGLONG now, bool onMount)
+    {
+        if (now >= nextWeaponInputCheck)
+        {
+            nextWeaponInputCheck = now + horseWeaponInputMs;
+            if (Pressed(wheelControl) || JustReleased(wheelControl) ||
+                JustPressed(holsterControl) || JustReleased(holsterControl))
+                manualHolsterGraceUntil = now + horseWeaponManualGraceMs;
+        }
+
+        if (now < nextWeaponSample)
+            return;
+        nextWeaponSample = now + horseWeaponSampleMs;
+
+        if (InvokeBoolean(getLoadingScreenActive) || !InvokeBoolean(isScreenFadedIn) ||
+            InvokeInt(isPedDeadOrDying, ped))
+        {
+            ResetWeaponTracking();
+            nextWeaponInputCheck = now + horseWeaponInputMs;
+            nextWeaponSample = now + horseWeaponSampleMs;
+            return;
+        }
+
+        const bool wheelActive = WeaponWheelActive();
+        if (wheelActive)
+            manualHolsterGraceUntil = now + horseWeaponManualGraceMs;
+
+        std::uint32_t current[5] = {};
+        for (int i = 0; i < 5; ++i)
+            current[i] = ReadWeaponSlot(ped, horseWeaponPoints[i]);
+
+        if (!weaponTrackingReady)
+        {
+            for (int i = 0; i < 5; ++i)
+            {
+                trackedWeapons[i] = current[i];
+                weaponChangedAt[i] = now;
+            }
+            weaponTrackingReady = true;
+            mountedSince = now;
+            for (int i = 0; i < 5; ++i)
+                lastReportedWeapons[i] = current[i];
+            if (Logger::IsDebugEnabled())
+            {
+                char message[224] = {};
+                std::snprintf(message, sizeof(message), "Horse: weapon slots initialized hand=%08X bow=%08X altBow=%08X rifle=%08X altRifle=%08X",
+                    current[0], current[1], current[2], current[3], current[4]);
+                Logger::Debug(message);
+            }
+            return;
+        }
+
+        if (onMount && !weaponSnapshotLogged && now - mountedSince >= 12000)
+        {
+            weaponSnapshotLogged = true;
+            if (Logger::IsDebugEnabled())
+            {
+                char message[224] = {};
+                std::snprintf(message, sizeof(message), "Horse: mounted weapon snapshot hand=%08X bow=%08X altBow=%08X rifle=%08X altRifle=%08X",
+                    current[0], current[1], current[2], current[3], current[4]);
+                Logger::Debug(message);
+            }
+        }
+
+        for (int i = 1; i < 5; ++i)
+        {
+            if (Logger::IsDebugEnabled() && current[i] != lastReportedWeapons[i])
+            {
+                char message[192] = {};
+                std::snprintf(message, sizeof(message), "Horse: weapon slot changed slot=%d previous=%08X current=%08X hand=%08X manualGrace=%s",
+                    horseWeaponPoints[i], lastReportedWeapons[i], current[i], current[0],
+                    now < manualHolsterGraceUntil ? "true" : "false");
+                Logger::Debug(message);
+                lastReportedWeapons[i] = current[i];
+            }
+            if (current[i] == trackedWeapons[i])
+            {
+                weaponRestoreAttempts[i] = 0;
+                continue;
+            }
+
+            bool weaponMoved = false;
+            for (int j = 0; j < 5; ++j)
+            {
+                if (j != i && current[j] == trackedWeapons[i])
+                {
+                    weaponMoved = true;
+                    break;
+                }
+            }
+
+            const bool lostLongarm = !weaponMoved &&
+                (current[i] == 0 || current[i] == unarmedWeapon) &&
+                trackedWeapons[i] != 0 && trackedWeapons[i] != unarmedWeapon &&
+                now - weaponChangedAt[i] >= horseWeaponStableMs &&
+                now - mountedSince >= horseWeaponStableMs &&
+                !wheelActive && now >= manualHolsterGraceUntil &&
+                IsLongarm(trackedWeapons[i]);
+
+            if (lostLongarm && weaponRestoreAttempts[i] < 2)
+            {
+                if (lastWeaponRestore == 0 || now - lastWeaponRestore >= horseWeaponRestoreCooldownMs)
+                {
+                    nativeInit(setCurrentPedWeapon);
+                    nativePush64(ped);
+                    nativePush64(trackedWeapons[i]);
+                    nativePush64(0);
+                    nativePush64(1);
+                    nativePush64(0);
+                    nativePush64(0);
+                    nativeCall();
+                    lastWeaponRestore = now;
+                    ++weaponRestoreAttempts[i];
+                    if (Logger::IsDebugEnabled())
+                    {
+                        char message[160] = {};
+                        std::snprintf(message, sizeof(message), "Horse: restoring longarm slot=%d weapon=%08X attempt=%u",
+                            horseWeaponPoints[i], trackedWeapons[i], static_cast<unsigned>(weaponRestoreAttempts[i]));
+                        Logger::Debug(message);
+                    }
+                }
+                continue;
+            }
+
+            trackedWeapons[i] = current[i];
+            weaponChangedAt[i] = now;
+            weaponRestoreAttempts[i] = 0;
+        }
+
+        if (current[0] != trackedWeapons[0])
+        {
+            trackedWeapons[0] = current[0];
+            weaponChangedAt[0] = now;
+        }
+    }
+
     struct Position
     {
         alignas(8) float x;
@@ -158,19 +373,6 @@ namespace
         std::uint32_t bits = 0;
         std::memcpy(&bits, &value, sizeof(bits));
         return bits;
-    }
-
-    bool InvokeBoolean(std::uint64_t hash)
-    {
-        nativeInit(hash);
-        return static_cast<std::uint32_t>(*nativeCall()) != 0;
-    }
-
-    std::uint32_t InvokeInt(std::uint64_t hash, std::uint64_t value)
-    {
-        nativeInit(hash);
-        nativePush64(value);
-        return static_cast<std::uint32_t>(*nativeCall());
     }
 
     bool ReadPosition(std::uint32_t entity, Position& position)
@@ -713,49 +915,18 @@ namespace
         }
     }
 
-    bool GetFlag(std::uint64_t ped)
-    {
-        nativeInit(getPedConfigFlag);
-        nativePush64(ped);
-        nativePush64(disablePlayerAutoHolsterFlag);
-        nativePush64(1);
-        return static_cast<std::uint32_t>(*nativeCall()) != 0;
-    }
-
-    void SetFlag(std::uint64_t ped, bool value)
-    {
-        nativeInit(setPedConfigFlag);
-        nativePush64(ped);
-        nativePush64(disablePlayerAutoHolsterFlag);
-        nativePush64(value ? 1 : 0);
-        nativeCall();
-    }
-
-    void RestoreFlag()
-    {
-        if (lastPlayerPed != 0 && holsterFlagChanged)
-        {
-            nativeInit(doesEntityExist);
-            nativePush64(lastPlayerPed);
-            if (static_cast<std::uint32_t>(*nativeCall()) != 0 && GetFlag(lastPlayerPed))
-                SetFlag(lastPlayerPed, lastHolsterFlag);
-        }
-        holsterFlagChanged = false;
-        mountFlagCaptured = false;
-    }
-
-    void LogState(const char* event, std::uint64_t ped, bool onMount, bool flag)
+    void LogState(const char* event, std::uint64_t ped, bool onMount)
     {
         if (!Logger::IsDebugEnabled())
             return;
 
         char message[256] = {};
-        std::snprintf(message, sizeof(message), "Horse: %s ped=%llu onMount=%s flag141=%s noAutoEquip=%s noAutoHolster=%s",
+        std::snprintf(message, sizeof(message), "Horse: %s ped=%llu onMount=%s noAutoEquip=%s noAutoHolster=%s",
             event, static_cast<unsigned long long>(ped), onMount ? "true" : "false",
-            flag ? "true" : "false", disableAutoEquip ? "true" : "false",
-            disableAutoHolster ? "true" : "false");
+            disableAutoEquip ? "true" : "false", disableAutoHolster ? "true" : "false");
         Logger::Debug(message);
     }
+
 }
 
 namespace Main::Horse
@@ -763,9 +934,11 @@ namespace Main::Horse
     void Initialize(bool noAutoHorseEquip, bool noAutoHorseHolster, bool noHorseAutoJump,
         bool noHorseWhistleDistance, bool horseFollowBehaviorFix)
     {
-        RestoreFlag();
+        ResetWeaponTracking();
         disableAutoEquip = noAutoHorseEquip;
         disableAutoHolster = noAutoHorseHolster;
+        if (!disableAutoEquip && !disableAutoHolster)
+            recentDismountUntil = 0;
         disableAutoJump = noHorseAutoJump;
         disableWhistleDistance = noHorseWhistleDistance;
         fixFollowBehavior = horseFollowBehaviorFix;
@@ -790,17 +963,15 @@ namespace Main::Horse
         if (disableAutoHolster)
         {
             unarmedWeapon = HashName("WEAPON_UNARMED");
-            toggleHolsterControl = HashName("INPUT_TOGGLE_HOLSTER");
-            openWeaponWheelControl = HashName("INPUT_OPEN_WHEEL_MENU");
-            nextWeaponControl = HashName("INPUT_NEXT_WEAPON");
-            previousWeaponControl = HashName("INPUT_PREV_WEAPON");
-            selectNextWeaponControl = HashName("INPUT_SELECT_NEXT_WEAPON");
-            selectPreviousWeaponControl = HashName("INPUT_SELECT_PREV_WEAPON");
-            horseAimControl = HashName("INPUT_HORSE_AIM");
-            horseAttackControl = HashName("INPUT_HORSE_ATTACK");
+            bowWeapon = HashName("WEAPON_BOW");
+            improvedBowWeapon = HashName("WEAPON_BOW_IMPROVED");
+            wheelControl = HashName("INPUT_OPEN_WHEEL_MENU");
+            holsterControl = HashName("INPUT_TOGGLE_HOLSTER");
         }
         if (disableAutoEquip || disableAutoHolster)
             Logger::Log("[INFO] Horse: weapon settings loaded.");
+        if (disableAutoHolster && Logger::IsDebugEnabled())
+            Logger::Debug("Horse: continuous horse holster prevention enabled.");
         if (disableAutoJump)
             Logger::Log("[INFO] DisableHorseAutoJump: enabled.");
         if (disableWhistleDistance)
@@ -816,9 +987,12 @@ namespace Main::Horse
 
         nativeInit(playerPedId);
         const std::uint64_t ped = static_cast<std::uint32_t>(*nativeCall());
-        if (ped == 0)
+        if (ped == 0 || (ped != lastPlayerPed && !InvokeInt(doesEntityExist, ped)))
         {
+            ResetWeaponTracking();
+            lastPlayerPed = 0;
             mounted = false;
+            recentDismountUntil = 0;
             CancelFollow();
             ResetWhistleState();
             RestoreHorseBlip();
@@ -829,7 +1003,7 @@ namespace Main::Horse
 
         if (lastPlayerPed != ped)
         {
-            RestoreFlag();
+            ResetWeaponTracking();
             CancelFollow();
             ResetWhistleState();
             RestoreHorseBlip();
@@ -837,7 +1011,6 @@ namespace Main::Horse
             nextHorseGameplayCheck = 0;
             mounted = false;
             recentDismountUntil = 0;
-            nextWeaponRefresh = 0;
         }
 
         nativeInit(isPedOnMount);
@@ -867,12 +1040,8 @@ namespace Main::Horse
                 RestoreHorseBlip();
             }
         }
-        if (mountChanged)
-        {
-            nextWeaponRefresh = onMount ? now + mountedWeaponGraceMs : 0;
-            if (!onMount)
-                recentDismountUntil = now + 3000;
-        }
+        if (mountChanged && !onMount)
+            recentDismountUntil = now + 3000;
 
         if (onMount && disableAutoJump)
         {
@@ -889,27 +1058,14 @@ namespace Main::Horse
             }
         }
 
-        if (disableAutoHolster)
+        if (mountChanged && onMount)
         {
-            if (onMount)
-            {
-                const bool current = GetFlag(ped);
-                if (!mountFlagCaptured)
-                {
-                    lastHolsterFlag = current;
-                    mountFlagCaptured = true;
-                }
-                if (!current)
-                {
-                    SetFlag(ped, true);
-                    holsterFlagChanged = true;
-                }
-            }
-            else if (mountFlagCaptured)
-                RestoreFlag();
+            ResetWeaponTracking();
+            recentDismountUntil = 0;
         }
 
-        if (disableAutoEquip && (onMount || now < recentDismountUntil))
+        const bool protectWeapons = onMount || now < recentDismountUntil;
+        if (protectWeapons && (disableAutoEquip || disableAutoHolster))
         {
             nativeInit(setForceAutoEquip);
             nativePush64(ped);
@@ -917,52 +1073,26 @@ namespace Main::Horse
             nativeCall();
         }
 
-        if (disableAutoHolster && onMount)
+        if (disableAutoHolster && protectWeapons)
         {
             nativeInit(setInstantlyStoreLongarmsOnDismount);
             nativePush64(ped);
             nativePush64(0);
             nativePush64(0);
             nativeCall();
+            UpdateWeaponTracking(ped, now, onMount);
         }
-
-        if (disableAutoHolster && onMount && unarmedWeapon != 0)
-        {
-            if (Pressed(openWeaponWheelControl) ||
-                JustPressed(toggleHolsterControl) || JustPressed(horseAimControl) ||
-                JustPressed(horseAttackControl) || JustPressed(nextWeaponControl) ||
-                JustPressed(previousWeaponControl) || JustPressed(selectNextWeaponControl) ||
-                JustPressed(selectPreviousWeaponControl))
-                nextWeaponRefresh = now + mountedWeaponGraceMs;
-
-            if (now >= nextWeaponRefresh)
-            {
-                nextWeaponRefresh = now + mountedWeaponRefreshMs;
-                std::uint32_t weapon = 0;
-                nativeInit(getCurrentPedWeapon);
-                nativePush64(ped);
-                nativePush64(reinterpret_cast<std::uint64_t>(&weapon));
-                nativePush64(0);
-                nativePush64(0);
-                nativePush64(0);
-                nativeCall();
-                if (weapon == unarmedWeapon)
-                {
-                    nativeInit(setCurrentPedWeapon);
-                    nativePush64(ped);
-                    nativePush64(weapon);
-                    nativePush64(1);
-                    nativePush64(0);
-                    nativePush64(0);
-                    nativePush64(0);
-                    nativeCall();
-                }
-            }
-        }
+        else if (weaponTrackingReady)
+            ResetWeaponTracking();
 
         if (mountChanged && Logger::IsDebugEnabled())
-            LogState(onMount ? "mounted" : "dismounted", ped, onMount, GetFlag(ped));
+            LogState(onMount ? "mounted" : "dismounted", ped, onMount);
         mounted = onMount;
+    }
+
+    bool NeedsAutoJumpFrameUpdate()
+    {
+        return mounted && disableAutoJump;
     }
 
     bool NeedsFastUpdate()
@@ -972,6 +1102,7 @@ namespace Main::Horse
 
     bool NeedsPerFrameUpdate()
     {
-        return (mounted && disableAutoJump) || disableWhistleDistance || fixFollowBehavior;
+        return (disableAutoHolster && (mounted || GetTickCount64() < recentDismountUntil)) ||
+            (mounted && disableAutoJump) || disableWhistleDistance || fixFollowBehavior;
     }
 }

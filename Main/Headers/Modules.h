@@ -10,6 +10,6 @@ namespace Main
     void InitializeEarly(const GameplayFixes::Settings& settings);
     void Initialize(const GameplayFixes::Settings& settings);
     void ReloadGameplay(const GameplayFixes::Settings& settings);
-    void Update(const GameplayFixes::Settings& settings);
+    void Update(const GameplayFixes::Settings& settings, bool updateOther);
     bool NeedsMaskedGameplayUpdate();
 }

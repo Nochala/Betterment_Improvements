@@ -18,6 +18,7 @@
 namespace
 {
     GameplayFixes::Settings settings;
+    ULONGLONG nextOtherUpdateAt = 0;
     INIT_ONCE earlyInitialization = INIT_ONCE_STATIC_INIT;
 
     std::wstring GetIniPath()
@@ -675,11 +676,6 @@ namespace
             success = WriteIniValue(path, L"Visual", L"DisableDeadEyeFilter", L"false", "Visual.DisableDeadEyeFilter") && success;
 
         existing[0] = L'\0';
-        GetPrivateProfileStringW(L"Visual", L"DisablePauseMenuFilter", L"", existing, 8, path.c_str());
-        if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisablePauseMenuFilter", L"false", "Visual.DisablePauseMenuFilter") && success;
-
-        existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableWeaponWheelFilter", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Visual", L"DisableWeaponWheelFilter", L"false", "Visual.DisableWeaponWheelFilter") && success;
@@ -934,7 +930,6 @@ namespace
             settings.disableDrunkFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableDrunkFilter", false);
             settings.disableEagleEyeFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableEagleEyeFilter", false);
             settings.disableDeadEyeFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableDeadEyeFilter", false);
-            settings.disablePauseMenuFilter = ReadIniBoolean(iniPath, L"Visual", L"DisablePauseMenuFilter", false);
             settings.disableWeaponWheelFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableWeaponWheelFilter", false);
             settings.disableLowHealthFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableLowHealthFilter", false);
             settings.disableHeadBob = ReadIniBoolean(iniPath, L"Visual", L"DisableHeadBob", false);
@@ -1035,7 +1030,6 @@ namespace GameplayFixes
             ", DisableDrunkFilter=" + (settings.disableDrunkFilter ? "true" : "false") +
             ", DisableEagleEyeFilter=" + (settings.disableEagleEyeFilter ? "true" : "false") +
             ", DisableDeadEyeFilter=" + (settings.disableDeadEyeFilter ? "true" : "false") +
-            ", DisablePauseMenuFilter=" + (settings.disablePauseMenuFilter ? "true" : "false") +
             ", DisableWeaponWheelFilter=" + (settings.disableWeaponWheelFilter ? "true" : "false") +
             ", DisableLowHealthFilter=" + (settings.disableLowHealthFilter ? "true" : "false") +
             ", DisableHeadBob=" + (settings.disableHeadBob ? "true" : "false") +
@@ -1066,6 +1060,7 @@ namespace GameplayFixes
         InitializeEarly();
         Logger::LogStartup();
         Main::Initialize(settings);
+        nextOtherUpdateAt = 0;
         Main::ConfigMenu::Initialize(GetIniPath(), settings);
         Main::NotifStats::Configure(settings.notification, settings.settingsMenu, settings.menuKey, settings.menuModifier);
         Logger::Log("[SUCCESS] Gameplay features: initialized.");
@@ -1083,6 +1078,7 @@ namespace GameplayFixes
         ReadModSettings(iniPath, candidate);
         const bool restartRequired = Main::ModReload::Apply(settings, candidate);
         settings = candidate;
+        nextOtherUpdateAt = 0;
         if (restartNeeded)
             *restartNeeded = restartRequired;
         Logger::SetEnabled(ReadIniBoolean(iniPath, L"General", L"Logging", true));
@@ -1095,28 +1091,47 @@ namespace GameplayFixes
         return true;
     }
 
-    void Update()
-    {
-        Main::ConfigMenu::Update();
-        if (settings.enabled)
-            Main::Update(settings);
-    }
-
-    unsigned int GetUpdateDelay()
+    static unsigned int GetNonHorseUpdateDelay()
     {
         if (Main::ConfigMenu::IsOpen())
             return 0U;
         return settings.enabled && (settings.disableDrunkFilter || settings.disableEagleEyeFilter ||
-            settings.disableDeadEyeFilter || settings.disablePauseMenuFilter || settings.disableWeaponWheelFilter ||
+            settings.disableDeadEyeFilter || settings.disableWeaponWheelFilter ||
             settings.disableLowHealthFilter || settings.disableIdleCamera || settings.disableHeadBob || settings.reduceCameraShake ||
             settings.reduceCameraSway || settings.reduceWeaponRecoil ||
             settings.reduceFirstPersonWeaponRecoil || settings.disableReticleSpread || settings.disableReticleSway ||
+            settings.disableArrowTrails ||
             Main::Camera::NeedsFastUpdate() ||
-            Main::Horse::NeedsPerFrameUpdate() ||
             Main::Player::NeedsFastUpdate()) ? 0U :
             (settings.enabled && (settings.quickLootBodies || settings.quickLootAnimals ||
             settings.disableFirstPersonAutoRun || settings.disableEmptyAutoReload ||
             Main::Horse::NeedsFastUpdate() ||
             Main::NeedsMaskedGameplayUpdate() || Main::SelfDefense::NeedsFastUpdate()) ? 50U : 250U);
     }
+
+    void Update()
+    {
+        Main::ConfigMenu::Update();
+        if (settings.enabled)
+        {
+            bool updateOther = true;
+            if (Main::Horse::NeedsAutoJumpFrameUpdate())
+            {
+                const unsigned int otherDelay = GetNonHorseUpdateDelay();
+                const ULONGLONG now = GetTickCount64();
+                updateOther = otherDelay == 0U || now >= nextOtherUpdateAt;
+                if (updateOther)
+                    nextOtherUpdateAt = now + otherDelay;
+            }
+            Main::Update(settings, updateOther);
+        }
+    }
+
+    unsigned int GetUpdateDelay()
+    {
+        if (settings.enabled && Main::Horse::NeedsPerFrameUpdate())
+            return 0U;
+        return GetNonHorseUpdateDelay();
+    }
+
 }

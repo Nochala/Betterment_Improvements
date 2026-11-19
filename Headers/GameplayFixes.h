@@ -64,7 +64,6 @@ namespace GameplayFixes
         bool disableDrunkFilter = false;
         bool disableEagleEyeFilter = false;
         bool disableDeadEyeFilter = false;
-        bool disablePauseMenuFilter = false;
         bool disableWeaponWheelFilter = false;
         bool disableLowHealthFilter = false;
         bool disableHeadBob = false;

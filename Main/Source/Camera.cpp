@@ -18,11 +18,12 @@ namespace
     constexpr const char* drunkFilters[] = {
         "PlayerDrunk01",
         "PlayerDrunkSaloon1",
-        "PlayerDrunkAberdeen"
+        "PlayerDrunkAberdeen",
+        "PlayerWakeUpDrunk",
+        "PlayerWakeUpAberdeen"
     };
     constexpr const char* eagleEyeFilter = "EagleEye";
     constexpr const char* deadEyeFilter = "DEADEYE";
-    constexpr const char* pauseMenuFilter = "PauseMenuIn";
     constexpr const char* weaponWheelFilter = "WheelHUDIn";
     constexpr const char* lowHealthFilters[] = {
         "PlayerHealthLow",
@@ -76,13 +77,11 @@ namespace
     bool drunkFilterDisabled = false;
     bool eagleEyeFilterDisabled = false;
     bool deadEyeFilterDisabled = false;
-    bool pauseMenuFilterDisabled = false;
     bool weaponWheelFilterDisabled = false;
     bool lowHealthFilterDisabled = false;
     bool drunkFilterStatusReported = false;
     bool eagleEyeFilterStatusReported = false;
     bool deadEyeFilterStatusReported = false;
-    bool pauseMenuFilterStatusReported = false;
     bool weaponWheelFilterStatusReported = false;
     bool lowHealthFilterStatusReported = false;
     bool headBobReductionEnabled = false;
@@ -423,18 +422,18 @@ namespace
         return *nativeCall() != 0;
     }
 
-    bool SuppressPostFx(const char* effect)
+    bool SuppressPostFx(const char* effect, bool observe)
     {
-        nativeInit(animpostfxIsRunning);
-        nativePush64(reinterpret_cast<std::uint64_t>(effect));
-        if (*nativeCall() == 0)
-            return false;
-
         nativeInit(animpostfxSetStrength);
         nativePush64(reinterpret_cast<std::uint64_t>(effect));
         nativePush64(0);
         nativeCall();
-        return true;
+
+        if (!observe)
+            return false;
+        nativeInit(animpostfxIsRunning);
+        nativePush64(reinterpret_cast<std::uint64_t>(effect));
+        return *nativeCall() != 0;
     }
 
     bool ControlPressed(std::uint32_t control)
@@ -581,7 +580,7 @@ namespace Main::Camera
 
     void Initialize(bool active, bool fixFullscreenTabOut, bool minimizeOnTabOut, bool disableHeadBob, bool reduceCameraShake, bool reduceCameraSway,
         bool disableDrunkFilter, bool disableEagleEyeFilter, bool disableDeadEyeFilter,
-        bool disablePauseMenuFilter, bool disableWeaponWheelFilter, bool disableLowHealthFilter,
+        bool disableWeaponWheelFilter, bool disableLowHealthFilter,
         bool reduceWeaponRecoil, float amplitudeScale,
         bool reduceFirstPersonWeaponRecoil, float firstPersonAmplitudeScale)
     {
@@ -589,13 +588,11 @@ namespace Main::Camera
         drunkFilterDisabled = disableDrunkFilter;
         eagleEyeFilterDisabled = disableEagleEyeFilter;
         deadEyeFilterDisabled = disableDeadEyeFilter;
-        pauseMenuFilterDisabled = disablePauseMenuFilter;
         weaponWheelFilterDisabled = disableWeaponWheelFilter;
         lowHealthFilterDisabled = disableLowHealthFilter;
         drunkFilterStatusReported = false;
         eagleEyeFilterStatusReported = false;
         deadEyeFilterStatusReported = false;
-        pauseMenuFilterStatusReported = false;
         weaponWheelFilterStatusReported = false;
         lowHealthFilterStatusReported = false;
         headBobReductionEnabled = disableHeadBob && !reduceCameraShake;
@@ -630,8 +627,6 @@ namespace Main::Camera
             Logger::Log("[INFO] DisableEagleEyeFilter: Eagle Eye screen effect disabled.");
         if (deadEyeFilterDisabled)
             Logger::Log("[INFO] DisableDeadEyeFilter: Dead Eye screen effect disabled.");
-        if (pauseMenuFilterDisabled)
-            Logger::Log("[INFO] DisablePauseMenuFilter: pause menu screen effect disabled.");
         if (weaponWheelFilterDisabled)
             Logger::Log("[INFO] DisableWeaponWheelFilter: weapon wheel screen effect disabled.");
         if (lowHealthFilterDisabled)
@@ -688,44 +683,38 @@ namespace Main::Camera
         const bool cameraFeaturesEnabled = enabled || headBobReductionEnabled || shakeReductionEnabled ||
             swayReductionEnabled || recoilReductionEnabled || firstPersonRecoilReductionEnabled;
         if (!cameraFeaturesEnabled && !drunkFilterDisabled && !eagleEyeFilterDisabled && !deadEyeFilterDisabled &&
-            !pauseMenuFilterDisabled && !weaponWheelFilterDisabled && !lowHealthFilterDisabled)
+            !weaponWheelFilterDisabled && !lowHealthFilterDisabled)
             return;
 
         if (drunkFilterDisabled)
         {
             bool suppressed = false;
+            const bool observe = !drunkFilterStatusReported && Logger::IsDebugEnabled();
             for (const char* effect : drunkFilters)
-                suppressed = SuppressPostFx(effect) || suppressed;
-            if (suppressed && !drunkFilterStatusReported && Logger::IsDebugEnabled())
+                suppressed = SuppressPostFx(effect, observe) || suppressed;
+            if (suppressed && !drunkFilterStatusReported)
             {
                 drunkFilterStatusReported = true;
-                Logger::Log("[DEBUG] DisableDrunkFilter: an active drunk post-effect was suppressed.");
+                Logger::Log("[DEBUG] DisableDrunkFilter: active drunk post-effect was suppressed without clearing playback.");
             }
         }
 
-        if (eagleEyeFilterDisabled && SuppressPostFx(eagleEyeFilter) &&
-            !eagleEyeFilterStatusReported && Logger::IsDebugEnabled())
+        if (eagleEyeFilterDisabled && SuppressPostFx(eagleEyeFilter,
+            !eagleEyeFilterStatusReported && Logger::IsDebugEnabled()) && !eagleEyeFilterStatusReported)
         {
             eagleEyeFilterStatusReported = true;
             Logger::Log("[DEBUG] DisableEagleEyeFilter: active Eagle Eye post-effect was suppressed.");
         }
 
-        if (deadEyeFilterDisabled && SuppressPostFx(deadEyeFilter) &&
-            !deadEyeFilterStatusReported && Logger::IsDebugEnabled())
+        if (deadEyeFilterDisabled && SuppressPostFx(deadEyeFilter,
+            !deadEyeFilterStatusReported && Logger::IsDebugEnabled()) && !deadEyeFilterStatusReported)
         {
             deadEyeFilterStatusReported = true;
             Logger::Log("[DEBUG] DisableDeadEyeFilter: active Dead Eye post-effect was suppressed.");
         }
 
-        if (pauseMenuFilterDisabled && SuppressPostFx(pauseMenuFilter) &&
-            !pauseMenuFilterStatusReported && Logger::IsDebugEnabled())
-        {
-            pauseMenuFilterStatusReported = true;
-            Logger::Log("[DEBUG] DisablePauseMenuFilter: active pause menu post-effect was suppressed.");
-        }
-
-        if (weaponWheelFilterDisabled && SuppressPostFx(weaponWheelFilter) &&
-            !weaponWheelFilterStatusReported && Logger::IsDebugEnabled())
+        if (weaponWheelFilterDisabled && SuppressPostFx(weaponWheelFilter,
+            !weaponWheelFilterStatusReported && Logger::IsDebugEnabled()) && !weaponWheelFilterStatusReported)
         {
             weaponWheelFilterStatusReported = true;
             Logger::Log("[DEBUG] DisableWeaponWheelFilter: active weapon wheel post-effect was suppressed.");
@@ -734,8 +723,9 @@ namespace Main::Camera
         if (lowHealthFilterDisabled)
         {
             bool suppressed = false;
+            const bool observe = !lowHealthFilterStatusReported && Logger::IsDebugEnabled();
             for (const char* effect : lowHealthFilters)
-                suppressed = SuppressPostFx(effect) || suppressed;
+                suppressed = SuppressPostFx(effect, observe) || suppressed;
             if (suppressed && !lowHealthFilterStatusReported && Logger::IsDebugEnabled())
             {
                 lowHealthFilterStatusReported = true;

@@ -125,8 +125,6 @@ namespace
     float menuRevealTarget = 0.0f;
     ULONGLONG menuTransitionStartedAt = 0;
     bool menuTransitionActive = false;
-    float pageReveal = 1.0f;
-    ULONGLONG pageTransitionStartedAt = 0;
 
     std::uint64_t FloatArgument(float value)
     {
@@ -286,14 +284,6 @@ namespace
                 menuTransitionActive = false;
             }
         }
-        if (pageTransitionStartedAt)
-        {
-            const float t = (std::min)(1.0f,
-                static_cast<float>(now - pageTransitionStartedAt) / 115.0f);
-            pageReveal = 0.80f + 0.20f * t * (2.0f - t);
-            if (t >= 1.0f)
-                pageTransitionStartedAt = 0;
-        }
     }
 
     void BeginMenuTransition(bool opening, ULONGLONG now)
@@ -303,12 +293,6 @@ namespace
         menuRevealTarget = opening ? 1.0f : 0.0f;
         menuTransitionStartedAt = now;
         menuTransitionActive = menuRevealStart != menuRevealTarget;
-    }
-
-    void BeginPageTransition(ULONGLONG now)
-    {
-        pageReveal = 0.80f;
-        pageTransitionStartedAt = now ? now : 1;
     }
 
     float MenuScale()
@@ -327,13 +311,12 @@ namespace
     {
         const float scale = MenuScale();
         const float top = static_cast<float>(menuPositionY) / 100.0f * (1.0f - 0.513f * scale);
-        return top + (y - 0.100f + (1.0f - menuReveal) * 0.010f +
-            (1.0f - pageReveal) * 0.004f) * scale;
+        return top + (y - 0.100f + (1.0f - menuReveal) * 0.010f) * scale;
     }
 
     int MenuAlpha(int alpha)
     {
-        return static_cast<int>((static_cast<float>(alpha * menuOpacity) * menuReveal * pageReveal + 50.0f) / 100.0f);
+        return static_cast<int>((static_cast<float>(alpha * menuOpacity) * menuReveal + 50.0f) / 100.0f);
     }
 
     Entry MakeEntry(const std::wstring& key, const std::wstring& value)
@@ -464,7 +447,6 @@ namespace
             { L"Visual", L"DisableDrunkFilter", L"false" },
             { L"Visual", L"DisableEagleEyeFilter", L"false" },
             { L"Visual", L"DisableDeadEyeFilter", L"false" },
-            { L"Visual", L"DisablePauseMenuFilter", L"false" },
             { L"Visual", L"DisableWeaponWheelFilter", L"false" },
             { L"Visual", L"DisableLowHealthFilter", L"false" },
             { L"Ambience", L"DisableAmbientMusic", L"false" },
@@ -530,7 +512,6 @@ namespace
             { L"Visual", L"DisableDrunkFilter", "FILTERS" },
             { L"Visual", L"DisableEagleEyeFilter", "FILTERS" },
             { L"Visual", L"DisableDeadEyeFilter", "FILTERS" },
-            { L"Visual", L"DisablePauseMenuFilter", "FILTERS" },
             { L"Visual", L"DisableWeaponWheelFilter", "FILTERS" },
             { L"Visual", L"DisableLowHealthFilter", "FILTERS" },
         };
@@ -569,6 +550,7 @@ namespace
                         continue;
                     const std::wstring key = setting.substr(0, separator);
                     if (!IsExperimentalMenuOption(key) &&
+                        (!Same(section.name, L"Visual") || DefaultSettingValue(section.name, key) != nullptr) &&
                         !(Same(section.name, L"General") && (Same(key, L"Enabled") || Same(key, L"SettingsMenu"))))
                         section.entries.push_back(MakeEntry(key, setting.substr(separator + 1)));
                 }
@@ -946,8 +928,8 @@ namespace
         {
             { L"Logging", "Writes general mod activity to the log file." },
             { L"DebugLogging", "Adds detailed debug information to the log." },
-            { L"Notification", "Shows a native notification when BettermentImprovements initializes and warns about errors." },
-            { L"SettingsMenu", "Enables the BettermentImprovements in-game configuration menu." },
+            { L"Notification", "Shows a native notification when Betterment Improvements initializes and warns about errors." },
+            { L"SettingsMenu", "Enables the Betterment Improvements in-game configuration menu." },
             { L"MenuKey", "Choose the menu hotkey. Delete clears it; Backspace cancels." },
             { L"MenuModifier", "Choose a modifier key. Delete removes it; Backspace cancels." },
             { L"UpdateIntervalMs", "Sets the update interval for features that do not require per-frame work." },
@@ -978,7 +960,6 @@ namespace
             { L"DisableDrunkFilter", "Removes the screen filter used while the player is drunk." },
             { L"DisableEagleEyeFilter", "Removes the Eagle Eye screen color filter." },
             { L"DisableDeadEyeFilter", "Removes the Dead Eye screen color filter." },
-            { L"DisablePauseMenuFilter", "Removes the visual filter associated with the pause menu." },
             { L"DisableWeaponWheelFilter", "Removes the filter shown when opening the weapon wheel." },
             { L"DisableLowHealthFilter", "Removes the low-health screen filter." },
             { L"DisableIdleCamera", "Prevents the automatic idle camera from activating." },
@@ -1131,7 +1112,7 @@ namespace
         else
             NativeRect(centreX, (topY + bottomY) * 0.5f, 0.304f, bottomY - topY - 0.018f, 0, 0, 0, 240);
 
-        NativeText("BETTERMENTIMPROVEMENTS", 0.124f, 0.119f, 20, 250, 241, 221, true);
+        NativeText("BETTERMENT IMPROVEMENTS", 0.084f, 0.119f, 30, 250, 241, 221, true);
         NativeText(Main::NotifStats::Version, 0.167f, 0.151f, 18, 223, 211, 192);
 
         const std::string subtitle = page == Page::Root ? "MAIN MENU" :
@@ -1548,8 +1529,6 @@ namespace Main::ConfigMenu
             menuOpen.store(false, std::memory_order_release);
             menuReveal = 0.0f;
             menuTransitionActive = false;
-            pageReveal = 1.0f;
-            pageTransitionStartedAt = 0;
         }
         menuKey.store(settings.menuKey, std::memory_order_release);
         menuModifier.store(settings.menuModifier, std::memory_order_release);
@@ -1573,8 +1552,6 @@ namespace Main::ConfigMenu
         menuRevealTarget = 0.0f;
         menuTransitionStartedAt = 0;
         menuTransitionActive = false;
-        pageReveal = 1.0f;
-        pageTransitionStartedAt = 0;
         actionStatus.clear();
     }
 
@@ -1653,8 +1630,6 @@ namespace Main::ConfigMenu
                 menuOpen.store(false, std::memory_order_release);
             menuReveal = 0.0f;
             menuTransitionActive = false;
-            pageReveal = 1.0f;
-            pageTransitionStartedAt = 0;
             captureMode.store(0, std::memory_order_release);
             capturedKey.store(0, std::memory_order_release);
             return;
@@ -1685,8 +1660,7 @@ namespace Main::ConfigMenu
             PlayMenuSound(open ? "MENU_ENTER" : "MENU_CLOSE");
             if (open)
             {
-                pageReveal = 1.0f;
-                pageTransitionStartedAt = 0;
+                Main::NotifStats::Dismiss();
                 ReloadSections();
                 page = Page::Root;
                 currentSection = -1;
@@ -1724,7 +1698,6 @@ namespace Main::ConfigMenu
                 page = Page::Root;
                 selected = previous == Page::MenuSettings ? 0 : previous == Page::GeneralSettings ? 1 : 2;
             }
-            BeginPageTransition(now);
         }
         else
         {
@@ -1753,7 +1726,6 @@ namespace Main::ConfigMenu
                         page = selected == 0 ? Page::MenuSettings : selected == 1 ? Page::GeneralSettings : Page::IniSections;
                         selected = 0;
                         actionStatus.clear();
-                        BeginPageTransition(now);
                     }
                     else if (selected == 3)
                         actionStatus = SaveAllSettings() ? "Settings saved." : "Unable to save some settings. Check log.";
@@ -1780,7 +1752,6 @@ namespace Main::ConfigMenu
                     page = Page::IniEntries;
                     selected = 0;
                     actionStatus.clear();
-                    BeginPageTransition(now);
                 }
                 else if (page == Page::MenuSettings && (actions & Select) && selected == 5)
                 {

@@ -32,6 +32,7 @@ namespace
     constexpr std::uint64_t statIdSetInt = 0xA4DDF5DF95E65EEEULL;
     constexpr std::uint64_t clearFeedChannel = 0xDD1232B332CBB9E7ULL;
     constexpr std::uint32_t honorCurrentHash = 0x89587B4E;
+    constexpr ULONGLONG updateIntervalMs = 50;
     constexpr ULONGLONG missionGraceMs = 3000;
     constexpr ULONGLONG wantedGraceMs = 3000;
     constexpr ULONGLONG aggressorLifetimeMs = 15000;
@@ -62,6 +63,7 @@ namespace
     ULONGLONG bountyFirstCorrectionAt = 0;
     ULONGLONG wantedSuppressionUntil = 0;
     bool wantedSuppressed = false;
+    ULONGLONG nextUpdateAt = 0;
 
     std::uint32_t ReadEntity(std::uint64_t hash, std::uint32_t entity)
     {
@@ -357,6 +359,7 @@ namespace Main::SelfDefense
         playerPed = 0;
         wantedSuppressionUntil = 0;
         wantedSuppressed = false;
+        nextUpdateAt = 0;
         if (honorEnabled)
             Logger::Log("[INFO] FixSelfDefenseHonorLoss: enabled for defensive kills.");
         if (bountyEnabled)
@@ -367,6 +370,10 @@ namespace Main::SelfDefense
     {
         if (!honorEnabled && !bountyEnabled)
             return;
+        const ULONGLONG now = GetTickCount64();
+        if (now < nextUpdateAt)
+            return;
+        nextUpdateAt = now + updateIntervalMs;
         if (MissionState::IsActiveOrRecentlyEnded(missionGraceMs))
         {
             Reset();
@@ -392,7 +399,6 @@ namespace Main::SelfDefense
 
         nativeInit(playerId);
         const int player = static_cast<int>(*nativeCall());
-        const ULONGLONG now = GetTickCount64();
         if (IsPlayerWanted(player))
         {
             wantedSuppressionUntil = now + wantedGraceMs;

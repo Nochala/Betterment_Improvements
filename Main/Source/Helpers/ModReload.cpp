@@ -109,7 +109,6 @@ namespace Main::ModReload
             current.disableDrunkFilter != next.disableDrunkFilter ||
             current.disableEagleEyeFilter != next.disableEagleEyeFilter ||
             current.disableDeadEyeFilter != next.disableDeadEyeFilter ||
-            current.disablePauseMenuFilter != next.disablePauseMenuFilter ||
             current.disableWeaponWheelFilter != next.disableWeaponWheelFilter ||
             current.disableLowHealthFilter != next.disableLowHealthFilter ||
             current.reduceWeaponRecoil != next.reduceWeaponRecoil ||
@@ -126,7 +125,6 @@ namespace Main::ModReload
                 next.enabled && next.disableDrunkFilter,
                 next.enabled && next.disableEagleEyeFilter,
                 next.enabled && next.disableDeadEyeFilter,
-                next.enabled && next.disablePauseMenuFilter,
                 next.enabled && next.disableWeaponWheelFilter,
                 next.enabled && next.disableLowHealthFilter,
                 next.enabled && next.reduceWeaponRecoil, next.recoilShakeAmplitudeScale,

@@ -1,4 +1,5 @@
 #include "../Headers/NotifStats.h"
+#include "../Headers/ConfigMenu.h"
 #include "../../Headers/Logger.h"
 #include "main.h"
 #include <windows.h>
@@ -17,6 +18,9 @@ namespace
     constexpr std::uint64_t createVarString = 0xFA925AC00EB830B9ULL;
     constexpr std::uint64_t getHashKey = 0xFD340785ADF8CFB7ULL;
     constexpr std::uint64_t postSampleToast = 0x26E87218390E6729ULL;
+    constexpr std::uint64_t getCurrentFeedMessage = 0xC17F69E1418CD11FULL;
+    constexpr std::uint64_t clearFeedChannel = 0xDD1232B332CBB9E7ULL;
+    constexpr std::uint64_t toastChannel = 6;
     constexpr std::uint64_t requestTextureDict = 0xC1BA29DF5631B0F8ULL;
     constexpr std::uint64_t hasTextureDictLoaded = 0x54D6900929CCF162ULL;
     constexpr std::uint64_t releaseTextureDict = 0x4ACA10A91F66F1E2ULL;
@@ -30,6 +34,8 @@ namespace
     constexpr char successIcon[] = "tick";
     constexpr char warningIcon[] = "cross";
     constexpr char iconColor[] = "COLOR_PURE_WHITE";
+    constexpr char successIconColor[] = "COLOR_REDDARK";
+    constexpr char notificationTextColor[] = "~COLOR_YELLOWVERYLIGHT~";
     using Clock = std::chrono::steady_clock;
 
     struct alignas(16) FeedDuration
@@ -52,6 +58,7 @@ namespace
     std::string lastWarningShown;
     Clock::time_point lastWarningShownAt{};
     bool initializedNotificationShown = false;
+    std::uint64_t lastToastHandle = 0;
     std::string startupShortcut;
     bool initialDelayStarted = false;
     bool textureRequested = false;
@@ -197,9 +204,12 @@ namespace
 
     bool ShowFeedMessage(const std::string& title, const std::string& message, bool warning, std::uint64_t& feedHandle, const std::string& secondary = {})
     {
-        const auto titleText = LiteralString(title.c_str());
-        const auto bodyText = LiteralString(message.c_str());
-        const auto secondaryText = secondary.empty() ? 0 : LiteralString(secondary.c_str());
+        const std::string coloredTitle = std::string(notificationTextColor) + title;
+        const std::string coloredMessage = std::string(notificationTextColor) + message;
+        const std::string coloredSecondary = std::string(notificationTextColor) + secondary;
+        const auto titleText = LiteralString(coloredTitle.c_str());
+        const auto bodyText = LiteralString(coloredMessage.c_str());
+        const auto secondaryText = secondary.empty() ? 0 : LiteralString(coloredSecondary.c_str());
         if (!titleText || !bodyText || (!secondary.empty() && !secondaryText))
             return false;
 
@@ -211,7 +221,7 @@ namespace
         info.fields[2] = bodyText;
         info.fields[4] = InvokeWithString(getHashKey, textureDict);
         info.fields[5] = InvokeWithString(getHashKey, warning ? warningIcon : successIcon);
-        info.fields[6] = InvokeWithString(getHashKey, iconColor);
+        info.fields[6] = InvokeWithString(getHashKey, warning ? iconColor : successIconColor);
         info.fields[7] = 1;
 
         nativeInit(postSampleToast);
@@ -231,6 +241,26 @@ namespace Main::NotifStats
     {
         startupShortcut = ShortcutText(settingsMenu, menuKey, menuModifier);
         enabled.store(active, std::memory_order_release);
+    }
+
+    void Dismiss()
+    {
+        initializedNotificationShown = true;
+        if (!lastToastHandle)
+            return;
+
+        nativeInit(getCurrentFeedMessage);
+        nativePush64(toastChannel);
+        const auto current = nativeCall();
+        if (current && static_cast<std::uint32_t>(*current) == static_cast<std::uint32_t>(lastToastHandle))
+        {
+            nativeInit(clearFeedChannel);
+            nativePush64(toastChannel);
+            nativePush64(1);
+            nativePush64(1);
+            nativeCall();
+        }
+        lastToastHandle = 0;
     }
 
     void Warning(const std::string& message)
@@ -254,6 +284,8 @@ namespace Main::NotifStats
 
     void Update()
     {
+        if (Main::ConfigMenu::IsOpen())
+            return;
         if (!enabled.load(std::memory_order_acquire) ||
             (initializedNotificationShown && !warningPending.load(std::memory_order_acquire)))
             return;
@@ -284,13 +316,14 @@ namespace Main::NotifStats
         if (!initializedNotificationShown)
         {
             std::uint64_t handle = 0;
-            if (!ShowFeedMessage("BettermentImprovements", std::string("Initialized Successfully | ") + Version, false, handle, startupShortcut))
+            if (!ShowFeedMessage("Betterment Improvements", std::string("Initialized Successfully | ") + Version, false, handle, startupShortcut))
             {
                 nextReadyCheck = now + std::chrono::seconds(1);
                 Logger::Log("[WARNING] Notification: could not create text; retrying.");
                 return;
             }
             initializedNotificationShown = true;
+            lastToastHandle = handle;
             if (warningPending.load(std::memory_order_acquire))
                 nextReadyCheck = now + std::chrono::milliseconds(1200);
             Logger::Log(("[INFO] Notification: startup toast sent (handle=" + std::to_string(handle) + "); visibility not verified.").c_str());
@@ -315,13 +348,14 @@ namespace Main::NotifStats
         }
 
         std::uint64_t handle = 0;
-        if (ShowFeedMessage("BettermentImprovements Warning", message, true, handle))
+        if (ShowFeedMessage("Betterment Improvements Warning", message, true, handle))
         {
             {
                 std::lock_guard<std::mutex> lock(warningMutex);
                 lastWarningShown = message;
                 lastWarningShownAt = now;
             }
+            lastToastHandle = handle;
             Logger::Log(("[INFO] Notification: warning toast sent (handle=" + std::to_string(handle) + "); visibility not verified.").c_str());
             nextReadyCheck = now + std::chrono::milliseconds(1200);
         }
