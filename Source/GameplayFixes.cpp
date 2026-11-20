@@ -628,6 +628,11 @@ namespace
             success = WriteIniValue(path, L"Visual", L"DisableVignette", L"false", "Visual.DisableVignette") && success;
 
         existing[0] = L'\0';
+        GetPrivateProfileStringW(L"Visual", L"DisableBloom", L"", existing, 8, path.c_str());
+        if (existing[0] == L'\0')
+            success = WriteIniValue(path, L"Visual", L"DisableBloom", L"false", "Visual.DisableBloom") && success;
+
+        existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"EnableDLSSAutoExposure", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Visual", L"EnableDLSSAutoExposure", L"false", "Visual.EnableDLSSAutoExposure") && success;
@@ -648,8 +653,7 @@ namespace
             { L"Visual", L"DisableCameraSmoothing" },
             { L"Diagnostics", L"DumpNativeHashes" },
             { L"Camera", L"RemoveCameraFade" },
-            { L"Diagnostics", L"TraceCameraNatives" },
-            { L"Visual", L"DisableBloom" }
+            { L"Diagnostics", L"TraceCameraNatives" }
         };
         for (const auto& option : obsoleteSettings)
         {
@@ -936,6 +940,7 @@ namespace
         { L"Startup", L"StraightToStoryMode", &GameplayFixes::Settings::straightToStoryMode, false },
         { L"Visual", L"RemoveBlackBars", &GameplayFixes::Settings::removeBlackBars, false },
         { L"Visual", L"DisableVignette", &GameplayFixes::Settings::disableVignette, false },
+        { L"Visual", L"DisableBloom", &GameplayFixes::Settings::disableBloom, false },
         { L"Visual", L"EnableDLSSAutoExposure", &GameplayFixes::Settings::enableDLSSAutoExposure, false },
         { L"Visual", L"DisableInteriorLighting", &GameplayFixes::Settings::disableInteriorLighting, false },
         { L"Visual", L"DisableDistantLights", &GameplayFixes::Settings::disableDistantLights, false },
@@ -1091,6 +1096,7 @@ namespace GameplayFixes
             ", CameraFOVOffset=" + std::to_string(settings.cameraFovOffset) +
             ", RemoveBlackBars=" + (settings.removeBlackBars ? "true" : "false") +
             ", DisableVignette=" + (settings.disableVignette ? "true" : "false") +
+            ", DisableBloom=" + (settings.disableBloom ? "true" : "false") +
             ", EnableDLSSAutoExposure=" + (settings.enableDLSSAutoExposure ? "true" : "false") +
             ", DisableInteriorLighting=" + (settings.disableInteriorLighting ? "true" : "false") +
             ", DisableDistantLights=" + (settings.disableDistantLights ? "true" : "false") +
