@@ -4,7 +4,7 @@
 [![Last Commit](https://badgen.net/github/last-commit/Nochala/Betterment_Improvements?label=Last%20Commit&color=purple)](https://github.com/Nochala/Betterment_Improvements/commits/main)
 ![Status](https://badgen.net/badge/Status/WIP/orange)
 
-A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG. The goal of this mod is to address Red Dead Redemption II engine limitations and performance issues while also introducing a wide range of gameplay improvements and quality-of-life features. 
+A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG. The goal of this mod is to address Red Dead Redemption II engine limitations and visual issues while also introducing a wide range of gameplay improvements and quality-of-life features. 
 
 ---
 ### Features
