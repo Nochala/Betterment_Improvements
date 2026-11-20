@@ -11,6 +11,7 @@
 #include "Looting.h"
 #include "Gunz.h"
 #include "WaterReflections.h"
+#include "DisableVignette.h"
 #include "DLSS.h"
 #include "MissionState.h"
 #include "SelfDefense.h"
@@ -980,6 +981,7 @@ namespace Main
 
     void Initialize(const GameplayFixes::Settings& settings)
     {
+        DisableVignette::Update(settings.enabled && settings.disableVignette);
         Audio::Initialize(settings.enabled && settings.disableAmbientMusic,
             settings.enabled && settings.disableCombatMusic,
             settings.enabled && settings.disableWantedMusic);
@@ -1065,7 +1067,7 @@ namespace Main
         UpdateHonorEventFilters();
     }
 
-    void Update(const GameplayFixes::Settings&, bool updateOther)
+    void Update(const GameplayFixes::Settings& settings, bool updateOther)
     {
         if (!updateOther)
         {
@@ -1077,6 +1079,7 @@ namespace Main
         Lighting::Update();
         Camera::Update();
         WaterReflections::UpdateOverscanDiagnostics();
+        DisableVignette::Update(settings.enabled && settings.disableVignette);
         Horse::Update();
         Player::Update();
         Gunz::Update();

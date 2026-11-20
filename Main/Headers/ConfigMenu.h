@@ -10,6 +10,7 @@ namespace GameplayFixes
 namespace Main::ConfigMenu
 {
     void Initialize(const std::wstring& iniPath, const GameplayFixes::Settings& settings);
+    void SetHotkey(int key, unsigned int modifier);
     void Update();
     bool IsOpen();
     void Shutdown();

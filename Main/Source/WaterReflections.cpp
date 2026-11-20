@@ -134,7 +134,7 @@ namespace
     };
 
     bool PatchPresentationShader(const ShaderModuleCreateInfo* info, float scale,
-        std::vector<std::uint32_t>& patched)
+        bool sharpenCrop, std::vector<std::uint32_t>& patched)
     {
         if (!info || info->sType != 16 || !info->pCode ||
             info->codeSize < 96 || info->codeSize > 8192 ||
@@ -158,6 +158,7 @@ namespace
         std::vector<Variable> variables(bound);
         std::uint32_t floatType = 0;
         std::uint32_t vec2Type = 0;
+        std::uint32_t vec4Type = 0;
         std::uint32_t input = 0;
         std::uint32_t output = 0;
         std::uint32_t texture = 0;
@@ -173,6 +174,7 @@ namespace
         std::uint32_t bindings = 0;
         std::size_t functionStart = 0;
         std::size_t sampleStart = 0;
+        std::size_t outputStore = 0;
         bool fragment = false;
 
         for (std::size_t index = 5; index < count;)
@@ -188,9 +190,13 @@ namespace
             }
             else if (opcode == 22 && length == 3 && words[index + 2] == 32)
                 floatType = words[index + 1];
-            else if (opcode == 23 && length == 4 && words[index + 3] == 2 &&
-                words[index + 2] == floatType)
-                vec2Type = words[index + 1];
+            else if (opcode == 23 && length == 4 && words[index + 2] == floatType)
+            {
+                if (words[index + 3] == 2)
+                    vec2Type = words[index + 1];
+                else if (words[index + 3] == 4)
+                    vec4Type = words[index + 1];
+            }
             else if (opcode == 71 && length == 4 && words[index + 1] < bound)
             {
                 Variable& variable = variables[static_cast<std::size_t>(words[index + 1])];
@@ -295,6 +301,7 @@ namespace
             else if (opcode == 62 && length == 3 && words[index + 1] == output)
             {
                 ++storeCount;
+                outputStore = index;
                 if (words[index + 2] != color || !color)
                     return false;
             }
@@ -345,6 +352,61 @@ namespace
         const std::size_t replacedSample = sampleStart + constantWords + operationWords;
         patched[replacedSample + 4] = result;
         patched[3] = bound + 6;
+
+        if (sharpenCrop && scale > 1.0f && vec4Type && words[sampleStart + 1] == vec4Type &&
+            (words[sampleStart] >> 16) == 5)
+        {
+            // Use the uncropped UV derivatives to place the four taps around the
+            // cropped center at the original fullscreen copy's sampling interval.
+            const std::uint32_t colorType = words[sampleStart + 1];
+            std::uint32_t nextId = patched[3];
+            const std::uint32_t strengthId = nextId++;
+            const float strength = 0.0625f * (scale - 1.0f);
+            std::uint32_t strengthBits = 0;
+            std::memcpy(&strengthBits, &strength, sizeof(strengthBits));
+
+            std::vector<std::uint32_t> filter;
+            const auto emit = [&](std::uint32_t opcode, std::uint32_t type,
+                std::initializer_list<std::uint32_t> operands)
+            {
+                const std::uint32_t id = nextId++;
+                filter.insert(filter.end(), {
+                    ((3u + static_cast<std::uint32_t>(operands.size())) << 16) | opcode, type, id
+                });
+                filter.insert(filter.end(), operands.begin(), operands.end());
+                return id;
+            };
+
+            constexpr std::uint32_t add = 129; // OpFAdd
+            constexpr std::uint32_t subtract = 131; // OpFSub
+            const auto dx = emit(207, vec2Type, { coordinate }); // OpDPdx
+            const auto dy = emit(208, vec2Type, { coordinate }); // OpDPdy
+            const auto sample = [&](std::uint32_t op, std::uint32_t step)
+            {
+                const auto uv = emit(op, vec2Type, { result, step });
+                return emit(87, colorType, { sampledImage, uv }); // OpImageSampleImplicitLod
+            };
+            const auto right = sample(add, dx);
+            const auto left = sample(subtract, dx);
+            const auto down = sample(add, dy);
+            const auto up = sample(subtract, dy);
+            const auto horizontal = emit(add, colorType, { left, right });
+            const auto vertical = emit(add, colorType, { up, down });
+            const auto neighbors = emit(add, colorType, { horizontal, vertical });
+            const auto twiceCenter = emit(add, colorType, { color, color });
+            const auto fourTimesCenter = emit(add, colorType, { twiceCenter, twiceCenter });
+            const auto detail = emit(subtract, colorType, { fourTimesCenter, neighbors });
+            const auto correction = emit(142, colorType, { detail, strengthId }); // OpVectorTimesScalar
+            const auto sharpened = emit(add, colorType, { color, correction });
+            const auto rgbWithOriginalAlpha = emit(79, colorType, { sharpened, color, 0, 1, 2, 7 }); // OpVectorShuffle
+
+            patched[outputStore + constantWords + operationWords + 2] = rgbWithOriginalAlpha;
+            patched.insert(patched.begin() + replacedSample + 5, filter.begin(), filter.end());
+            patched.insert(patched.begin() + functionStart, {
+                (4u << 16) | 43u, floatType, strengthId, strengthBits
+            });
+            patched[3] = nextId;
+        }
         return true;
     }
 
@@ -654,7 +716,7 @@ namespace
             const float cropScale = cropMode == 6 ? 1.0f :
                 (cropMode == 7 || cropMode == 10) ? -1.0f :
                 cropMode == 8 ? 1.25f : cropMode == 9 ? 1.5f : overscanScale;
-            if (candidateMatch && PatchPresentationShader(info, cropScale, cropped))
+            if (candidateMatch && PatchPresentationShader(info, cropScale, cropMode == 0, cropped))
             {
                 presentationShaderMatches.fetch_add(1);
                 ShaderModuleCreateInfo modified = *info;
@@ -691,8 +753,10 @@ namespace
                     Logger::Log("[WARNING] ExpandSSRCoverage: Vulkan rejected presentation crop; original shader retained.");
             }
         }
-        if (overscanCropEnabled.load(std::memory_order_acquire) &&
-            overscanCropTestMode.load(std::memory_order_relaxed) != 4)
+        // Keep the original camera composite in normal mode. The transition
+        // override is retained for the existing shader diagnostic modes.
+        const int testMode = overscanCropTestMode.load(std::memory_order_relaxed);
+        if (overscanCropEnabled.load(std::memory_order_acquire) && testMode >= 3 && testMode != 4)
         {
             std::vector<std::uint32_t> neutralized;
             if (PatchCameraTransitionShader(info, neutralized))

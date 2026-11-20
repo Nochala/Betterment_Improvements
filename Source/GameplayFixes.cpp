@@ -76,17 +76,21 @@ namespace
         return iniPath;
     }
 
-    bool ReadIniBoolean(const std::wstring& path, const wchar_t* section, const wchar_t* key, bool defaultValue)
+    bool ParseBoolean(const wchar_t* value, bool defaultValue)
     {
-        wchar_t value[16] = {};
-        GetPrivateProfileStringW(section, key, defaultValue ? L"true" : L"false", value, 16, path.c_str());
-
         if (CompareStringOrdinal(value, -1, L"true", -1, TRUE) == CSTR_EQUAL)
             return true;
         if (CompareStringOrdinal(value, -1, L"false", -1, TRUE) == CSTR_EQUAL)
             return false;
 
         return defaultValue;
+    }
+
+    bool ReadIniBoolean(const std::wstring& path, const wchar_t* section, const wchar_t* key, bool defaultValue)
+    {
+        wchar_t value[16]{};
+        GetPrivateProfileStringW(section, key, defaultValue ? L"true" : L"false", value, 16, path.c_str());
+        return ParseBoolean(value, defaultValue);
     }
 
     std::wstring ReadIniString(const std::wstring& path, const wchar_t* section, const wchar_t* key, const wchar_t* fallback)
@@ -145,9 +149,8 @@ namespace
         return key < 0 ? VK_F8 : key;
     }
 
-    unsigned int ReadMenuModifier(const std::wstring& path)
+    unsigned int ParseMenuModifier(const std::wstring& value)
     {
-        std::wstring value = ReadIniString(path, L"General", L"MenuModifier", L"none");
         if (value.find(L'+') == std::wstring::npos &&
             CompareStringOrdinal(value.c_str(), -1, L"ctrl", -1, TRUE) != CSTR_EQUAL &&
             CompareStringOrdinal(value.c_str(), -1, L"control", -1, TRUE) != CSTR_EQUAL &&
@@ -191,11 +194,8 @@ namespace
         return mask;
     }
 
-    float ReadIniFloat(const std::wstring& path, const wchar_t* section, const wchar_t* key, float defaultValue)
+    float ParseSettingFloat(const wchar_t* value, float defaultValue)
     {
-        wchar_t value[64] = {};
-        const std::wstring fallback = std::to_wstring(defaultValue);
-        GetPrivateProfileStringW(section, key, fallback.c_str(), value, 64, path.c_str());
         wchar_t* end = nullptr;
         const float parsed = std::wcstof(value, &end);
         if (end == value || *end != L'\0' || !std::isfinite(parsed))
@@ -205,6 +205,13 @@ namespace
         if (parsed > 1.0f)
             return 1.0f;
         return parsed;
+    }
+
+    float ReadIniFloat(const std::wstring& path, const wchar_t* section, const wchar_t* key, float defaultValue)
+    {
+        const auto fallback = std::to_wstring(defaultValue);
+        const auto value = ReadIniString(path, section, key, fallback.c_str());
+        return ParseSettingFloat(value.c_str(), defaultValue);
     }
 
     float ReadOverscanScale(const std::wstring& path)
@@ -616,6 +623,11 @@ namespace
             success = WriteIniValue(path, L"Visual", L"RemoveBlackBars", L"false", "Visual.RemoveBlackBars") && success;
 
         existing[0] = L'\0';
+        GetPrivateProfileStringW(L"Visual", L"DisableVignette", L"", existing, 8, path.c_str());
+        if (existing[0] == L'\0')
+            success = WriteIniValue(path, L"Visual", L"DisableVignette", L"false", "Visual.DisableVignette") && success;
+
+        existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"EnableDLSSAutoExposure", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Visual", L"EnableDLSSAutoExposure", L"false", "Visual.EnableDLSSAutoExposure") && success;
@@ -637,7 +649,6 @@ namespace
             { L"Diagnostics", L"DumpNativeHashes" },
             { L"Camera", L"RemoveCameraFade" },
             { L"Diagnostics", L"TraceCameraNatives" },
-            { L"Visual", L"DisableVignette" },
             { L"Visual", L"DisableBloom" }
         };
         for (const auto& option : obsoleteSettings)
@@ -869,80 +880,138 @@ namespace
         return success;
     }
 
+    template <typename T>
+    struct SettingBinding
+    {
+        const wchar_t* section;
+        const wchar_t* key;
+        T GameplayFixes::Settings::* member;
+        T defaultValue;
+    };
+
+    constexpr SettingBinding<bool> booleanSettings[] = {
+        { L"General", L"Enabled", &GameplayFixes::Settings::enabled, true },
+        { L"General", L"SettingsMenu", &GameplayFixes::Settings::settingsMenu, true },
+        { L"General", L"Notification", &GameplayFixes::Settings::notification, true },
+        { L"Engine", L"TextureCrashFix", &GameplayFixes::Settings::textureCrashFix, true },
+        { L"Engine", L"ExtendHeapLimits", &GameplayFixes::Settings::extendHeapLimits, true },
+        { L"Engine", L"ExtendPackfileLimits", &GameplayFixes::Settings::extendPackfileLimits, true },
+        { L"Engine", L"ExtendPedMemoryLimits", &GameplayFixes::Settings::extendPedMemoryLimits, true },
+        { L"Engine", L"ExtendStreamingPools", &GameplayFixes::Settings::extendStreamingPools, true },
+        { L"Engine", L"OptimizeStreamingMemory", &GameplayFixes::Settings::optimizeStreamingMemory, true },
+        { L"Engine", L"ExtendAssetPools", &GameplayFixes::Settings::extendAssetPools, true },
+        { L"Engine", L"TextureStreamingStutterFix", &GameplayFixes::Settings::textureStreamingStutterFix, false },
+        { L"Engine", L"ImproveTextureStreaming", &GameplayFixes::Settings::improveTextureStreaming, true },
+        { L"Engine", L"ExpandSSRCoverage", &GameplayFixes::Settings::expandSsrCoverage, false },
+        { L"Gameplay", L"DisableAutoHorseEquip", &GameplayFixes::Settings::noAutoHorseEquip, true },
+        { L"Gameplay", L"DisableAutoHorseHolster", &GameplayFixes::Settings::noAutoHorseHolster, true },
+        { L"Gameplay", L"DisableHorseAutoJump", &GameplayFixes::Settings::disableHorseAutoJump, false },
+        { L"Gameplay", L"DisableHorseWhistleDistance", &GameplayFixes::Settings::disableHorseWhistleDistance, false },
+        { L"Gameplay", L"FixHorseFollowBehavior", &GameplayFixes::Settings::fixHorseFollowBehavior, false },
+        { L"Gameplay", L"DisableAutoAmmoPickup", &GameplayFixes::Settings::noAutoAmmoPickup, false },
+        { L"Weapons", L"DisableAutoReload", &GameplayFixes::Settings::disableAutoReload, true },
+        { L"Weapons", L"DisableDeadEyeAutoReload", &GameplayFixes::Settings::disableDeadEyeAutoReload, true },
+        { L"Weapons", L"DisableEmptyAutoReload", &GameplayFixes::Settings::disableEmptyAutoReload, true },
+        { L"Weapons", L"DisableArrowTrails", &GameplayFixes::Settings::disableArrowTrails, false },
+        { L"Weapons", L"DisableReticleSpread", &GameplayFixes::Settings::disableReticleSpread, false },
+        { L"Weapons", L"DisableReticleSway", &GameplayFixes::Settings::disableReticleSway, false },
+        { L"Weapons", L"DisableForcedScope", &GameplayFixes::Settings::disableForcedScope, true },
+        { L"Weapons", L"DisableWeaponDegradation", &GameplayFixes::Settings::disableWeaponDegradation, false },
+        { L"Weapons", L"DisableHitmarkers", &GameplayFixes::Settings::disableHitmarkers, false },
+        { L"Weapons", L"DisableReticleHighlighting", &GameplayFixes::Settings::disableReticleHighlighting, false },
+        { L"Player", L"DisableFirstPersonAutoRun", &GameplayFixes::Settings::disableFirstPersonAutoRun, false },
+        { L"Player", L"QuickLootBodies", &GameplayFixes::Settings::quickLootBodies, false },
+        { L"Player", L"QuickLootAnimals", &GameplayFixes::Settings::quickLootAnimals, false },
+        { L"Gameplay", L"DisableHonorLossWhenMasked", &GameplayFixes::Settings::disableHonorLossWhenMasked, true },
+        { L"Gameplay", L"DisableBountyWhenMasked", &GameplayFixes::Settings::disableBountyWhenMasked, true },
+        { L"Gameplay", L"DisableBounties", &GameplayFixes::Settings::disableBounties, false },
+        { L"Gameplay", L"FixSelfDefenseHonorLoss", &GameplayFixes::Settings::fixSelfDefenseHonorLoss, true },
+        { L"Gameplay", L"FixSelfDefenseBounties", &GameplayFixes::Settings::fixSelfDefenseBounties, true },
+        { L"Gameplay", L"DisableHonorSystem", &GameplayFixes::Settings::disableHonorSystem, false },
+        { L"Gameplay", L"DisableBodySearchHonorLoss", &GameplayFixes::Settings::disableBodySearchHonorLoss, true },
+        { L"Gameplay", L"DisableAntagonizeHonorLoss", &GameplayFixes::Settings::disableAntagonizeHonorLoss, false },
+        { L"Gameplay", L"DisableOutOfBoundSnipers", &GameplayFixes::Settings::disableOutOfBoundSnipers, false },
+        { L"Startup", L"SkipIntroSplashes", &GameplayFixes::Settings::skipIntroSplashes, true },
+        { L"Startup", L"SkipLegal", &GameplayFixes::Settings::skipLegal, true },
+        { L"Startup", L"StraightToStoryMode", &GameplayFixes::Settings::straightToStoryMode, false },
+        { L"Visual", L"RemoveBlackBars", &GameplayFixes::Settings::removeBlackBars, false },
+        { L"Visual", L"DisableVignette", &GameplayFixes::Settings::disableVignette, false },
+        { L"Visual", L"EnableDLSSAutoExposure", &GameplayFixes::Settings::enableDLSSAutoExposure, false },
+        { L"Visual", L"DisableInteriorLighting", &GameplayFixes::Settings::disableInteriorLighting, false },
+        { L"Visual", L"DisableDistantLights", &GameplayFixes::Settings::disableDistantLights, false },
+        { L"Visual", L"DisableIdleCamera", &GameplayFixes::Settings::disableIdleCamera, false },
+        { L"Visual", L"FixFullscreenTabOut", &GameplayFixes::Settings::fixFullscreenTabOut, false },
+        { L"Visual", L"MinimizeOnTabOut", &GameplayFixes::Settings::minimizeOnTabOut, false },
+        { L"Visual", L"DisableDrunkFilter", &GameplayFixes::Settings::disableDrunkFilter, false },
+        { L"Visual", L"DisableEagleEyeFilter", &GameplayFixes::Settings::disableEagleEyeFilter, false },
+        { L"Visual", L"DisableDeadEyeFilter", &GameplayFixes::Settings::disableDeadEyeFilter, false },
+        { L"Visual", L"DisableWeaponWheelFilter", &GameplayFixes::Settings::disableWeaponWheelFilter, false },
+        { L"Visual", L"DisableLowHealthFilter", &GameplayFixes::Settings::disableLowHealthFilter, false },
+        { L"Visual", L"DisableHeadBob", &GameplayFixes::Settings::disableHeadBob, false },
+        { L"Visual", L"ReduceCameraShake", &GameplayFixes::Settings::reduceCameraShake, false },
+        { L"Visual", L"ReduceCameraSway", &GameplayFixes::Settings::reduceCameraSway, false },
+        { L"Visual", L"ReduceWeaponRecoil", &GameplayFixes::Settings::reduceWeaponRecoil, false },
+        { L"Visual", L"ReduceFirstPersonWeaponRecoil", &GameplayFixes::Settings::reduceFirstPersonWeaponRecoil, false },
+        { L"Ambience", L"DisableAmbientMusic", &GameplayFixes::Settings::disableAmbientMusic, false },
+        { L"Ambience", L"DisableCombatMusic", &GameplayFixes::Settings::disableCombatMusic, false },
+        { L"Ambience", L"DisableWantedMusic", &GameplayFixes::Settings::disableWantedMusic, false },
+        { L"Diagnostics", L"CrashDiagnostics", &GameplayFixes::Settings::crashDiagnostics, false },
+    };
+
+    constexpr SettingBinding<float> floatSettings[] = {
+        { L"Visual", L"RecoilShakeAmplitudeScale", &GameplayFixes::Settings::recoilShakeAmplitudeScale, 0.5f },
+        { L"Visual", L"FirstPersonRecoilShakeAmplitudeScale", &GameplayFixes::Settings::firstPersonRecoilShakeAmplitudeScale, 0.5f },
+    };
+
+    bool MatchesSetting(const wchar_t* first, const wchar_t* second)
+    {
+        return CompareStringOrdinal(first, -1, second, -1, TRUE) == CSTR_EQUAL;
+    }
+
+    bool ReadMenuSetting(GameplayFixes::Settings& target, const wchar_t* section, const wchar_t* key,
+        const std::wstring& value)
+    {
+        if (Main::ModReload::RequiresGameRestart(section, key))
+            return false;
+
+        if (MatchesSetting(section, L"General") && MatchesSetting(key, L"MenuKey"))
+        {
+            const auto parsed = ParseMenuKey(value);
+            target.menuKey = parsed < 0 ? VK_F8 : parsed;
+            return true;
+        }
+        if (MatchesSetting(section, L"General") && MatchesSetting(key, L"MenuModifier"))
+        {
+            target.menuModifier = ParseMenuModifier(value);
+            return true;
+        }
+
+        for (const auto& option : booleanSettings)
+            if (MatchesSetting(section, option.section) && MatchesSetting(key, option.key))
+            {
+                target.*option.member = ParseBoolean(value.c_str(), target.*option.member);
+                return true;
+            }
+        for (const auto& option : floatSettings)
+            if (MatchesSetting(section, option.section) && MatchesSetting(key, option.key))
+            {
+                target.*option.member = ParseSettingFloat(value.c_str(), target.*option.member);
+                return true;
+            }
+        return false;
+    }
+
     void ReadModSettings(const std::wstring& iniPath, GameplayFixes::Settings& settings)
     {
-            settings.enabled = ReadIniBoolean(iniPath, L"General", L"Enabled", true);
-            settings.settingsMenu = ReadIniBoolean(iniPath, L"General", L"SettingsMenu", true);
-            settings.notification = ReadIniBoolean(iniPath, L"General", L"Notification", true);
-            settings.menuKey = ReadMenuKey(iniPath);
-            settings.menuModifier = ReadMenuModifier(iniPath);
-            settings.textureCrashFix = ReadIniBoolean(iniPath, L"Engine", L"TextureCrashFix", true);
-            settings.extendHeapLimits = ReadIniBoolean(iniPath, L"Engine", L"ExtendHeapLimits", true);
-            settings.extendPackfileLimits = ReadIniBoolean(iniPath, L"Engine", L"ExtendPackfileLimits", true);
-            settings.extendPedMemoryLimits = ReadIniBoolean(iniPath, L"Engine", L"ExtendPedMemoryLimits", true);
-            settings.extendStreamingPools = ReadIniBoolean(iniPath, L"Engine", L"ExtendStreamingPools", true);
-            settings.optimizeStreamingMemory = ReadIniBoolean(iniPath, L"Engine", L"OptimizeStreamingMemory", true);
-            settings.extendAssetPools = ReadIniBoolean(iniPath, L"Engine", L"ExtendAssetPools", true);
-            settings.textureStreamingStutterFix = ReadIniBoolean(iniPath, L"Engine", L"TextureStreamingStutterFix", false);
-            settings.improveTextureStreaming = ReadIniBoolean(iniPath, L"Engine", L"ImproveTextureStreaming", true);
-            settings.expandSsrCoverage = ReadIniBoolean(iniPath, L"Engine", L"ExpandSSRCoverage", false);
-            settings.ssrOverscanScale = ReadOverscanScale(iniPath);
-            settings.ssrOverscanTestMode = ReadOverscanTestMode(iniPath);
-            settings.noAutoHorseEquip = ReadIniBoolean(iniPath, L"Gameplay", L"DisableAutoHorseEquip", true);
-            settings.noAutoHorseHolster = ReadIniBoolean(iniPath, L"Gameplay", L"DisableAutoHorseHolster", true);
-            settings.disableHorseAutoJump = ReadIniBoolean(iniPath, L"Gameplay", L"DisableHorseAutoJump", false);
-            settings.disableHorseWhistleDistance = ReadIniBoolean(iniPath, L"Gameplay", L"DisableHorseWhistleDistance", false);
-            settings.fixHorseFollowBehavior = ReadIniBoolean(iniPath, L"Gameplay", L"FixHorseFollowBehavior", false);
-            settings.noAutoAmmoPickup = ReadIniBoolean(iniPath, L"Gameplay", L"DisableAutoAmmoPickup", false);
-            settings.disableAutoReload = ReadIniBoolean(iniPath, L"Weapons", L"DisableAutoReload", true);
-            settings.disableDeadEyeAutoReload = ReadIniBoolean(iniPath, L"Weapons", L"DisableDeadEyeAutoReload", true);
-            settings.disableEmptyAutoReload = ReadIniBoolean(iniPath, L"Weapons", L"DisableEmptyAutoReload", true);
-            settings.disableArrowTrails = ReadIniBoolean(iniPath, L"Weapons", L"DisableArrowTrails", false);
-            settings.disableReticleSpread = ReadIniBoolean(iniPath, L"Weapons", L"DisableReticleSpread", false);
-            settings.disableReticleSway = ReadIniBoolean(iniPath, L"Weapons", L"DisableReticleSway", false);
-            settings.disableForcedScope = ReadIniBoolean(iniPath, L"Weapons", L"DisableForcedScope", true);
-            settings.disableWeaponDegradation = ReadIniBoolean(iniPath, L"Weapons", L"DisableWeaponDegradation", false);
-            settings.disableHitmarkers = ReadIniBoolean(iniPath, L"Weapons", L"DisableHitmarkers", false);
-            settings.disableReticleHighlighting = ReadIniBoolean(iniPath, L"Weapons", L"DisableReticleHighlighting", false);
-            settings.disableFirstPersonAutoRun = ReadIniBoolean(iniPath, L"Player", L"DisableFirstPersonAutoRun", false);
-            settings.quickLootBodies = ReadIniBoolean(iniPath, L"Player", L"QuickLootBodies", false);
-            settings.quickLootAnimals = ReadIniBoolean(iniPath, L"Player", L"QuickLootAnimals", false);
-            settings.disableHonorLossWhenMasked = ReadIniBoolean(iniPath, L"Gameplay", L"DisableHonorLossWhenMasked", true);
-            settings.disableBountyWhenMasked = ReadIniBoolean(iniPath, L"Gameplay", L"DisableBountyWhenMasked", true);
-            settings.disableBounties = ReadIniBoolean(iniPath, L"Gameplay", L"DisableBounties", false);
-            settings.fixSelfDefenseHonorLoss = ReadIniBoolean(iniPath, L"Gameplay", L"FixSelfDefenseHonorLoss", true);
-            settings.fixSelfDefenseBounties = ReadIniBoolean(iniPath, L"Gameplay", L"FixSelfDefenseBounties", true);
-            settings.disableHonorSystem = ReadIniBoolean(iniPath, L"Gameplay", L"DisableHonorSystem", false);
-            settings.disableBodySearchHonorLoss = ReadIniBoolean(iniPath, L"Gameplay", L"DisableBodySearchHonorLoss", true);
-            settings.disableAntagonizeHonorLoss = ReadIniBoolean(iniPath, L"Gameplay", L"DisableAntagonizeHonorLoss", false);
-            settings.disableOutOfBoundSnipers = ReadIniBoolean(iniPath, L"Gameplay", L"DisableOutOfBoundSnipers", false);
-            settings.skipIntroSplashes = ReadIniBoolean(iniPath, L"Startup", L"SkipIntroSplashes", true);
-            settings.skipLegal = ReadIniBoolean(iniPath, L"Startup", L"SkipLegal", true);
-            settings.straightToStoryMode = ReadIniBoolean(iniPath, L"Startup", L"StraightToStoryMode", false);
-            settings.cameraFovOffset = ReadCameraFovOffset(iniPath);
-            settings.removeBlackBars = ReadIniBoolean(iniPath, L"Visual", L"RemoveBlackBars", false);
-            settings.enableDLSSAutoExposure = ReadIniBoolean(iniPath, L"Visual", L"EnableDLSSAutoExposure", false);
-            settings.disableInteriorLighting = ReadIniBoolean(iniPath, L"Visual", L"DisableInteriorLighting", false);
-            settings.disableDistantLights = ReadIniBoolean(iniPath, L"Visual", L"DisableDistantLights", false);
-            settings.disableIdleCamera = ReadIniBoolean(iniPath, L"Visual", L"DisableIdleCamera", false);
-            settings.fixFullscreenTabOut = ReadIniBoolean(iniPath, L"Visual", L"FixFullscreenTabOut", false);
-            settings.minimizeOnTabOut = ReadIniBoolean(iniPath, L"Visual", L"MinimizeOnTabOut", false);
-            settings.disableDrunkFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableDrunkFilter", false);
-            settings.disableEagleEyeFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableEagleEyeFilter", false);
-            settings.disableDeadEyeFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableDeadEyeFilter", false);
-            settings.disableWeaponWheelFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableWeaponWheelFilter", false);
-            settings.disableLowHealthFilter = ReadIniBoolean(iniPath, L"Visual", L"DisableLowHealthFilter", false);
-            settings.disableHeadBob = ReadIniBoolean(iniPath, L"Visual", L"DisableHeadBob", false);
-            settings.reduceCameraShake = ReadIniBoolean(iniPath, L"Visual", L"ReduceCameraShake", false);
-            settings.reduceCameraSway = ReadIniBoolean(iniPath, L"Visual", L"ReduceCameraSway", false);
-            settings.reduceWeaponRecoil = ReadIniBoolean(iniPath, L"Visual", L"ReduceWeaponRecoil", false);
-            settings.recoilShakeAmplitudeScale = ReadIniFloat(iniPath, L"Visual", L"RecoilShakeAmplitudeScale", 0.5f);
-            settings.reduceFirstPersonWeaponRecoil = ReadIniBoolean(iniPath, L"Visual", L"ReduceFirstPersonWeaponRecoil", false);
-            settings.firstPersonRecoilShakeAmplitudeScale = ReadIniFloat(iniPath, L"Visual", L"FirstPersonRecoilShakeAmplitudeScale", 0.5f);
-            settings.disableAmbientMusic = ReadIniBoolean(iniPath, L"Ambience", L"DisableAmbientMusic", false);
-            settings.disableCombatMusic = ReadIniBoolean(iniPath, L"Ambience", L"DisableCombatMusic", false);
-            settings.disableWantedMusic = ReadIniBoolean(iniPath, L"Ambience", L"DisableWantedMusic", false);
-            settings.crashDiagnostics = ReadIniBoolean(iniPath, L"Diagnostics", L"CrashDiagnostics", false);
+        for (const auto& option : booleanSettings)
+            settings.*option.member = ReadIniBoolean(iniPath, option.section, option.key, option.defaultValue);
+        for (const auto& option : floatSettings)
+            settings.*option.member = ReadIniFloat(iniPath, option.section, option.key, option.defaultValue);
+        settings.menuKey = ReadMenuKey(iniPath);
+        settings.menuModifier = ParseMenuModifier(ReadIniString(iniPath, L"General", L"MenuModifier", L"none"));
+        settings.ssrOverscanScale = ReadOverscanScale(iniPath);
+        settings.ssrOverscanTestMode = ReadOverscanTestMode(iniPath);
+        settings.cameraFovOffset = ReadCameraFovOffset(iniPath);
     }
 }
 
@@ -1021,6 +1090,7 @@ namespace GameplayFixes
             ", StraightToStoryMode=" + (settings.straightToStoryMode ? "true" : "false") +
             ", CameraFOVOffset=" + std::to_string(settings.cameraFovOffset) +
             ", RemoveBlackBars=" + (settings.removeBlackBars ? "true" : "false") +
+            ", DisableVignette=" + (settings.disableVignette ? "true" : "false") +
             ", EnableDLSSAutoExposure=" + (settings.enableDLSSAutoExposure ? "true" : "false") +
             ", DisableInteriorLighting=" + (settings.disableInteriorLighting ? "true" : "false") +
             ", DisableDistantLights=" + (settings.disableDistantLights ? "true" : "false") +
@@ -1066,7 +1136,41 @@ namespace GameplayFixes
         Logger::Log("[SUCCESS] Gameplay features: initialized.");
     }
 
-    bool Reload(bool* restartNeeded)
+    void ApplyMenuSetting(const wchar_t* section, const wchar_t* key, const std::wstring& value)
+    {
+        if (Main::ModReload::RequiresGameRestart(section, key))
+            return;
+
+        if (MatchesSetting(section, L"General"))
+        {
+            if (MatchesSetting(key, L"Logging"))
+            {
+                Logger::SetEnabled(ParseBoolean(value.c_str(), true));
+                return;
+            }
+            if (MatchesSetting(key, L"DebugLogging"))
+            {
+                Logger::SetDebugEnabled(ParseBoolean(value.c_str(), false));
+                return;
+            }
+        }
+
+        Settings candidate = settings;
+        if (!ReadMenuSetting(candidate, section, key, value))
+            return;
+
+        const bool hotkeyChanged = settings.menuKey != candidate.menuKey || settings.menuModifier != candidate.menuModifier;
+        const bool notificationChanged = settings.notification != candidate.notification;
+        Main::ModReload::Apply(settings, candidate);
+        settings = candidate;
+        nextOtherUpdateAt = 0;
+        if (hotkeyChanged)
+            Main::ConfigMenu::SetHotkey(settings.menuKey, settings.menuModifier);
+        if (hotkeyChanged || notificationChanged)
+            Main::NotifStats::Configure(settings.notification, settings.settingsMenu, settings.menuKey, settings.menuModifier);
+    }
+
+    bool Reload(bool* restartNeeded, const MenuSettingChanges* unsaved)
     {
         const std::wstring iniPath = GetIniPath();
         if (iniPath.empty() || GetFileAttributesW(iniPath.c_str()) == INVALID_FILE_ATTRIBUTES)
@@ -1076,13 +1180,28 @@ namespace GameplayFixes
         }
         Settings candidate = settings;
         ReadModSettings(iniPath, candidate);
+        bool logging = ReadIniBoolean(iniPath, L"General", L"Logging", true);
+        bool debugLogging = ReadIniBoolean(iniPath, L"General", L"DebugLogging", false);
+        if (unsaved)
+            for (const auto& [setting, value] : *unsaved)
+            {
+                const auto* section = setting.first.c_str();
+                const auto* key = setting.second.c_str();
+                if (MatchesSetting(section, L"General") && MatchesSetting(key, L"Logging"))
+                    logging = ParseBoolean(value.c_str(), logging);
+                else if (MatchesSetting(section, L"General") && MatchesSetting(key, L"DebugLogging"))
+                    debugLogging = ParseBoolean(value.c_str(), debugLogging);
+                else
+                    ReadMenuSetting(candidate, section, key, value);
+            }
+
         const bool restartRequired = Main::ModReload::Apply(settings, candidate);
         settings = candidate;
         nextOtherUpdateAt = 0;
         if (restartNeeded)
             *restartNeeded = restartRequired;
-        Logger::SetEnabled(ReadIniBoolean(iniPath, L"General", L"Logging", true));
-        Logger::SetDebugEnabled(ReadIniBoolean(iniPath, L"General", L"DebugLogging", false));
+        Logger::SetEnabled(logging);
+        Logger::SetDebugEnabled(debugLogging);
         Main::ConfigMenu::Initialize(iniPath, settings);
         Main::NotifStats::Configure(settings.notification, settings.settingsMenu, settings.menuKey, settings.menuModifier);
         Logger::Log(restartRequired ?

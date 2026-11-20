@@ -1,4 +1,7 @@
 #pragma once
+#include <map>
+#include <string>
+#include <utility>
 
 namespace GameplayFixes
 {
@@ -51,6 +54,7 @@ namespace GameplayFixes
         bool skipLegal = true;
         bool straightToStoryMode = false;
         bool removeBlackBars = false;
+        bool disableVignette = false;
         float cameraFovOffset = 0.0f;
         bool expandSsrCoverage = false;
         float ssrOverscanScale = 1.25f;
@@ -80,7 +84,9 @@ namespace GameplayFixes
 
     void InitializeEarly();
     void Initialize();
-    bool Reload(bool* restartRequired = nullptr);
+    void ApplyMenuSetting(const wchar_t* section, const wchar_t* key, const std::wstring& value);
+    using MenuSettingChanges = std::map<std::pair<std::wstring, std::wstring>, std::wstring>;
+    bool Reload(bool* restartRequired = nullptr, const MenuSettingChanges* unsaved = nullptr);
     void Update();
     unsigned int GetUpdateDelay();
 }

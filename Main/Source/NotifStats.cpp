@@ -20,7 +20,10 @@ namespace
     constexpr std::uint64_t postSampleToast = 0x26E87218390E6729ULL;
     constexpr std::uint64_t getCurrentFeedMessage = 0xC17F69E1418CD11FULL;
     constexpr std::uint64_t clearFeedChannel = 0xDD1232B332CBB9E7ULL;
+    constexpr std::uint64_t clearFeedMessage = 0x2F901291EF177B02ULL;
+    constexpr std::uint64_t getFeedMessageState = 0x59FA676177DBE4C9ULL;
     constexpr std::uint64_t toastChannel = 6;
+    constexpr std::uint32_t exitingFeedState = 5;
     constexpr std::uint64_t requestTextureDict = 0xC1BA29DF5631B0F8ULL;
     constexpr std::uint64_t hasTextureDictLoaded = 0x54D6900929CCF162ULL;
     constexpr std::uint64_t releaseTextureDict = 0x4ACA10A91F66F1E2ULL;
@@ -58,7 +61,7 @@ namespace
     std::string lastWarningShown;
     Clock::time_point lastWarningShownAt{};
     bool initializedNotificationShown = false;
-    std::uint64_t lastToastHandle = 0;
+    std::deque<std::uint32_t> toastHandles;
     std::string startupShortcut;
     bool initialDelayStarted = false;
     bool textureRequested = false;
@@ -202,6 +205,24 @@ namespace
         return false;
     }
 
+    bool IsFeedMessageActive(std::uint32_t handle)
+    {
+        nativeInit(getFeedMessageState);
+        nativePush64(handle);
+        const auto result = nativeCall();
+        return result && static_cast<std::uint32_t>(*result) < exitingFeedState;
+    }
+
+    void TrackToast(std::uint64_t handle)
+    {
+        toastHandles.erase(std::remove_if(toastHandles.begin(), toastHandles.end(), [](std::uint32_t item)
+        {
+            return !IsFeedMessageActive(item);
+        }), toastHandles.end());
+        if (static_cast<std::uint32_t>(handle) != 0 && static_cast<std::uint32_t>(handle) != UINT32_MAX)
+            toastHandles.push_back(static_cast<std::uint32_t>(handle));
+    }
+
     bool ShowFeedMessage(const std::string& title, const std::string& message, bool warning, std::uint64_t& feedHandle, const std::string& secondary = {})
     {
         const std::string coloredTitle = std::string(notificationTextColor) + title;
@@ -246,13 +267,31 @@ namespace Main::NotifStats
     void Dismiss()
     {
         initializedNotificationShown = true;
-        if (!lastToastHandle)
+        if (toastHandles.empty())
+            return;
+
+        for (auto it = toastHandles.begin(); it != toastHandles.end();)
+        {
+            if (!IsFeedMessageActive(*it))
+            {
+                it = toastHandles.erase(it);
+                continue;
+            }
+
+            nativeInit(clearFeedMessage);
+            nativePush64(*it);
+            nativePush64(1);
+            nativeCall();
+            ++it;
+        }
+        if (toastHandles.empty())
             return;
 
         nativeInit(getCurrentFeedMessage);
         nativePush64(toastChannel);
         const auto current = nativeCall();
-        if (current && static_cast<std::uint32_t>(*current) == static_cast<std::uint32_t>(lastToastHandle))
+        if (current && std::find(toastHandles.begin(), toastHandles.end(),
+            static_cast<std::uint32_t>(*current)) != toastHandles.end())
         {
             nativeInit(clearFeedChannel);
             nativePush64(toastChannel);
@@ -260,7 +299,6 @@ namespace Main::NotifStats
             nativePush64(1);
             nativeCall();
         }
-        lastToastHandle = 0;
     }
 
     void Warning(const std::string& message)
@@ -285,7 +323,10 @@ namespace Main::NotifStats
     void Update()
     {
         if (Main::ConfigMenu::IsOpen())
+        {
+            Dismiss();
             return;
+        }
         if (!enabled.load(std::memory_order_acquire) ||
             (initializedNotificationShown && !warningPending.load(std::memory_order_acquire)))
             return;
@@ -323,7 +364,7 @@ namespace Main::NotifStats
                 return;
             }
             initializedNotificationShown = true;
-            lastToastHandle = handle;
+            TrackToast(handle);
             if (warningPending.load(std::memory_order_acquire))
                 nextReadyCheck = now + std::chrono::milliseconds(1200);
             Logger::Log(("[INFO] Notification: startup toast sent (handle=" + std::to_string(handle) + "); visibility not verified.").c_str());
@@ -355,7 +396,7 @@ namespace Main::NotifStats
                 lastWarningShown = message;
                 lastWarningShownAt = now;
             }
-            lastToastHandle = handle;
+            TrackToast(handle);
             Logger::Log(("[INFO] Notification: warning toast sent (handle=" + std::to_string(handle) + "); visibility not verified.").c_str());
             nextReadyCheck = now + std::chrono::milliseconds(1200);
         }

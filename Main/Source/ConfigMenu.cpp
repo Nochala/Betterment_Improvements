@@ -106,7 +106,7 @@ namespace
     int savedMenuOpacity = 100;
     bool savedMenuAudioEnabled = true;
     bool menuPreferencesDirty = false;
-    std::map<std::pair<std::wstring, std::wstring>, std::wstring> pendingChanges;
+    GameplayFixes::MenuSettingChanges pendingChanges;
     std::map<std::pair<std::wstring, std::wstring>, std::wstring> originalRestartValues;
     bool restartPendingFromDisk = false;
     std::string actionStatus;
@@ -434,6 +434,7 @@ namespace
             { L"Weapons", L"DisableReticleSway", L"false" },
             { L"Weapons", L"DisableWeaponDegradation", L"false" },
             { L"Visual", L"RemoveBlackBars", L"true" },
+            { L"Visual", L"DisableVignette", L"false" },
             { L"Visual", L"EnableDLSSAutoExposure", L"false" },
             { L"Visual", L"FixFullscreenTabOut", L"true" },
             { L"Visual", L"MinimizeOnTabOut", L"true" },
@@ -499,6 +500,7 @@ namespace
             { L"Weapons", L"DisableReticleSway", "AIMING & EFFECTS" },
             { L"Weapons", L"DisableWeaponDegradation", "MAINTENANCE" },
             { L"Visual", L"RemoveBlackBars", "DISPLAY" },
+            { L"Visual", L"DisableVignette", "DISPLAY" },
             { L"Visual", L"EnableDLSSAutoExposure", "DISPLAY" },
             { L"Visual", L"FixFullscreenTabOut", "DISPLAY" },
             { L"Visual", L"MinimizeOnTabOut", "DISPLAY" },
@@ -919,7 +921,7 @@ namespace
         const auto& options = section->entries;
         if (selected == static_cast<int>(options.size()))
             return !actionStatus.empty() ? actionStatus :
-                "Restore this category's defaults. Save from the main menu to apply them.";
+                "Restore this category's defaults. Save from the main menu to keep them.";
         if (selected < 0 || selected >= static_cast<int>(options.size()))
             return {};
         const auto& setting = options[selected];
@@ -953,6 +955,7 @@ namespace
             { L"FastStoryModeLoading", "Enables changes intended to shorten Story Mode loading." },
             { L"RemoveOnlineTab", "Hides the Online tab from the front end." },
             { L"RemoveBlackBars", "Removes cinematic black bars where supported." },
+            { L"DisableVignette", "Disables vignette from weather and timecycle modifiers." },
             { L"CameraFOVOffset", "Adjusts the camera field-of-view offset." },
             { L"EnableDLSSAutoExposure", "Enables automatic exposure handling for DLSS." },
             { L"DisableInteriorLighting", "Disables interior lighting effects." },
@@ -1013,7 +1016,7 @@ namespace
                 return item.description;
         return setting.type == ValueType::Text ?
             "This option is displayed as text and cannot be edited here." :
-            "Change this feature setting. Save from the main menu.";
+            "Changes apply immediately when supported. Save from the main menu to keep them.";
     }
 
     bool RequiresGameRestart(const Entry& entry)
@@ -1096,8 +1099,9 @@ namespace
         const bool restart = section && page != Page::IniSections &&
             selected >= 0 && selected < static_cast<int>(section->entries.size()) &&
             RequiresGameRestart(section->entries[selected]);
-        const bool restartWarning = restart || (reloadSelected && (restartPendingFromDisk || !originalRestartValues.empty()));
-        const int footerLines = static_cast<int>(description.size()) + (saved || restartWarning ? 1 : 0);
+        const bool restartPending = restartPendingFromDisk || !originalRestartValues.empty();
+        const bool restartWarning = restartPending || restart;
+        const int footerLines = static_cast<int>(description.size()) + (restartWarning ? 1 : 0);
         const bool unsaved = !pendingChanges.empty() || menuPreferencesDirty;
         const float unsavedY = 0.058f + static_cast<float>((std::max)(0, footerLines - 2)) * 0.023f;
         const float footerEndY = 0.014f + static_cast<float>(footerLines - 1) * 0.023f;
@@ -1283,10 +1287,8 @@ namespace
             NativeText(description[index], labelX, listBottomY + 0.014f + static_cast<float>(index) * 0.023f, 19,
                 saved || reloadSuccess ? 133 : 243, saved || reloadSuccess ? 207 : 232, saved || reloadSuccess ? 139 : 215);
         const float nextLineY = listBottomY + 0.014f + static_cast<float>(description.size()) * 0.023f;
-        if (saved)
-            NativeText("Reload Mod to apply changes", labelX, nextLineY, 19, 226, 64, 58);
-        else if (restartWarning)
-            NativeText(reloadSelected ? "Some Features Require Restart" : "Requires Game Restart",
+        if (restartWarning)
+            NativeText(restartPending ? "Some Changes Require Restart" : "Requires Game Restart",
                 labelX, nextLineY, 19, 226, 64, 58);
         if (unsaved)
             NativeText("UNSAVED CHANGES", labelX, listBottomY + unsavedY, 17, 226, 64, 58);
@@ -1316,6 +1318,8 @@ namespace
         ScreenText("Delete: None   Backspace: Cancel", 0.033f, 0.132f, 0.19f, 213, 207, 198);
     }
 
+    void StageEntryValue(Section& section, Entry& entry, const std::wstring& next);
+
     bool SaveCapturedBinding(int mode, int key)
     {
         if (page != Page::GeneralSettings || selected < 0 || selected >= static_cast<int>(generalSection.entries.size()))
@@ -1325,26 +1329,7 @@ namespace
             (mode == 2 && entry.type != ValueType::Modifier))
             return false;
         const std::wstring value = key == -2 ? L"none" : KeyName(static_cast<DWORD>(key));
-        const bool matchesSaved = entry.type == ValueType::MenuKey || entry.type == ValueType::Modifier ?
-            Same(value, entry.savedValue.c_str()) : value == entry.savedValue;
-        entry.value = matchesSaved ? entry.savedValue : value;
-        const auto pendingKey = std::make_pair(generalSection.name, entry.key);
-        if (matchesSaved)
-            pendingChanges.erase(pendingKey);
-        else
-            pendingChanges[pendingKey] = value;
-        actionStatus.clear();
-        if (mode == 1)
-            menuKey.store(key == -2 ? 0 : key, std::memory_order_release);
-        else
-        {
-            const unsigned mask = key == -2 ? 0 :
-                (key == VK_CONTROL || key == VK_LCONTROL || key == VK_RCONTROL) ? 1U :
-                (key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT) ? 2U :
-                (key == VK_MENU || key == VK_LMENU || key == VK_RMENU) ? 4U :
-                0x10000U | static_cast<unsigned>(key);
-            menuModifier.store(mask, std::memory_order_release);
-        }
+        StageEntryValue(generalSection, entry, value);
         Logger::Log("[INFO] Settings menu: hotkey updated.");
         return true;
     }
@@ -1391,7 +1376,8 @@ namespace
             const auto original = originalRestartValues.find(key);
             if (original == originalRestartValues.end())
                 originalRestartValues.emplace(key, entry.value);
-            else if (MatchesEntryValue(entry, next, original->second))
+            else if (MatchesEntryValue(entry, next, original->second) &&
+                MatchesEntryValue(entry, entry.savedValue, original->second))
                 originalRestartValues.erase(original);
         }
         const bool matchesSaved = MatchesEntryValue(entry, next, entry.savedValue);
@@ -1400,6 +1386,7 @@ namespace
             pendingChanges.erase(key);
         else
             pendingChanges[key] = next;
+        GameplayFixes::ApplyMenuSetting(section.name.c_str(), entry.key.c_str(), next);
         actionStatus.clear();
     }
 
@@ -1414,12 +1401,7 @@ namespace
             if (defaultValue)
                 StageEntryValue(*section, entry, defaultValue);
         }
-        if (page == Page::GeneralSettings)
-        {
-            menuKey.store(VK_F8, std::memory_order_release);
-            menuModifier.store(0, std::memory_order_release);
-        }
-        actionStatus = "Category defaults selected. Save settings to .ini to apply.";
+        actionStatus = "Category defaults selected. Save settings to keep them.";
     }
 
     void RestoreMenuDefaults()
@@ -1430,7 +1412,7 @@ namespace
         menuOpacity = 100;
         menuAudioEnabled = true;
         RefreshMenuPreferencesDirty();
-        actionStatus = "Menu defaults selected. Save settings to .ini to apply.";
+        actionStatus = "Menu defaults selected. Save settings to keep them.";
     }
 
     bool ChangeEntry(int direction)
@@ -1496,6 +1478,10 @@ namespace
                         if (Same(entry.key, it->first.second.c_str()))
                         {
                             entry.savedValue = it->second;
+                            const auto original = originalRestartValues.find(it->first);
+                            if (original != originalRestartValues.end() &&
+                                MatchesEntryValue(entry, entry.savedValue, original->second))
+                                originalRestartValues.erase(original);
                             break;
                         }
                 it = pendingChanges.erase(it);
@@ -1530,9 +1516,14 @@ namespace Main::ConfigMenu
             menuReveal = 0.0f;
             menuTransitionActive = false;
         }
-        menuKey.store(settings.menuKey, std::memory_order_release);
-        menuModifier.store(settings.menuModifier, std::memory_order_release);
+        SetHotkey(settings.menuKey, settings.menuModifier);
         configured.store(settings.settingsMenu && !configPath.empty(), std::memory_order_release);
+    }
+
+    void SetHotkey(int key, unsigned int modifier)
+    {
+        menuKey.store(key, std::memory_order_release);
+        menuModifier.store(modifier, std::memory_order_release);
     }
 
     void Shutdown()
@@ -1729,16 +1720,13 @@ namespace Main::ConfigMenu
                     }
                     else if (selected == 3)
                         actionStatus = SaveAllSettings() ? "Settings saved." : "Unable to save some settings. Check log.";
-                    else if (!pendingChanges.empty() || menuPreferencesDirty)
-                        actionStatus = "Save your changes before reloading.";
                     else
                     {
                         bool restartNeeded = false;
-                        const bool reloaded = GameplayFixes::Reload(&restartNeeded);
+                        const bool reloaded = GameplayFixes::Reload(&restartNeeded, &pendingChanges);
                         if (reloaded)
                         {
                             restartPendingFromDisk = restartNeeded;
-                            pendingChanges.clear();
                             ReloadSections();
                         }
                         actionStatus = !reloaded ? "Reload failed. Check log." : restartNeeded ?
