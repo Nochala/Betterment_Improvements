@@ -435,6 +435,7 @@ namespace
             { L"Weapons", L"DisableWeaponDegradation", L"false" },
             { L"Visual", L"RemoveBlackBars", L"true" },
             { L"Visual", L"DisableVignette", L"false" },
+            { L"Visual", L"DisableBloom", L"false" },
             { L"Visual", L"EnableDLSSAutoExposure", L"false" },
             { L"Visual", L"FixFullscreenTabOut", L"true" },
             { L"Visual", L"MinimizeOnTabOut", L"true" },
@@ -501,6 +502,7 @@ namespace
             { L"Weapons", L"DisableWeaponDegradation", "MAINTENANCE" },
             { L"Visual", L"RemoveBlackBars", "DISPLAY" },
             { L"Visual", L"DisableVignette", "DISPLAY" },
+            { L"Visual", L"DisableBloom", "DISPLAY" },
             { L"Visual", L"EnableDLSSAutoExposure", "DISPLAY" },
             { L"Visual", L"FixFullscreenTabOut", "DISPLAY" },
             { L"Visual", L"MinimizeOnTabOut", "DISPLAY" },
@@ -956,6 +958,7 @@ namespace
             { L"RemoveOnlineTab", "Hides the Online tab from the front end." },
             { L"RemoveBlackBars", "Removes cinematic black bars where supported." },
             { L"DisableVignette", "Disables vignette from weather and timecycle modifiers." },
+            { L"DisableBloom", "Disables bloom and fog bloom from weather and timecycle modifiers." },
             { L"CameraFOVOffset", "Adjusts the camera field-of-view offset." },
             { L"EnableDLSSAutoExposure", "Enables automatic exposure handling for DLSS." },
             { L"DisableInteriorLighting", "Disables interior lighting effects." },
@@ -1553,12 +1556,16 @@ namespace Main::ConfigMenu
 
     void OnKeyboard(DWORD key, WORD, BYTE scanCode, BOOL isExtended, BOOL, BOOL wasDownBefore, BOOL isUpNow)
     {
-        if (!configured.load(std::memory_order_acquire) || isUpNow)
+        if (!configured.load(std::memory_order_acquire) || isUpNow || (isExtended && key == VK_RETURN))
             return;
-        if ((GetKeyState(VK_NUMLOCK) & 1) == 0 &&
+
+        const bool keypadSelect = !isExtended && (key == VK_NUMPAD5 || (key == VK_CLEAR && scanCode == 0x4C));
+        if (!keypadSelect && (GetKeyState(VK_NUMLOCK) & 1) == 0 &&
             ((!isExtended && (scanCode == 0x37 || (scanCode >= 0x47 && scanCode <= 0x53))) ||
-                (isExtended && (scanCode == 0x1C || scanCode == 0x35))))
+                (isExtended && scanCode == 0x35)))
             return;
+        if (keypadSelect)
+            key = VK_NUMPAD5;
         if (captureMode.load(std::memory_order_acquire) != 0)
         {
             if (!wasDownBefore && key > 0 && key < 256)
@@ -1595,7 +1602,7 @@ namespace Main::ConfigMenu
             action = Left;
         else if (key == VK_RIGHT || key == VK_NUMPAD6)
             action = Right;
-        else if ((key == VK_RETURN || key == VK_SPACE) && !wasDownBefore)
+        else if ((key == VK_RETURN || keypadSelect) && !wasDownBefore)
             action = Select;
         else if ((key == VK_BACK || key == VK_ESCAPE || key == VK_NUMPAD0) && !wasDownBefore)
             action = Back;

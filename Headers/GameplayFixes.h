@@ -55,6 +55,7 @@ namespace GameplayFixes
         bool straightToStoryMode = false;
         bool removeBlackBars = false;
         bool disableVignette = false;
+        bool disableBloom = false;
         float cameraFovOffset = 0.0f;
         bool expandSsrCoverage = false;
         float ssrOverscanScale = 1.25f;

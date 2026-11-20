@@ -356,8 +356,8 @@ namespace
         if (sharpenCrop && scale > 1.0f && vec4Type && words[sampleStart + 1] == vec4Type &&
             (words[sampleStart] >> 16) == 5)
         {
-            // Use the uncropped UV derivatives to place the four taps around the
-            // cropped center at the original fullscreen copy's sampling interval.
+
+
             const std::uint32_t colorType = words[sampleStart + 1];
             std::uint32_t nextId = patched[3];
             const std::uint32_t strengthId = nextId++;
@@ -377,14 +377,14 @@ namespace
                 return id;
             };
 
-            constexpr std::uint32_t add = 129; // OpFAdd
-            constexpr std::uint32_t subtract = 131; // OpFSub
-            const auto dx = emit(207, vec2Type, { coordinate }); // OpDPdx
-            const auto dy = emit(208, vec2Type, { coordinate }); // OpDPdy
+            constexpr std::uint32_t add = 129;
+            constexpr std::uint32_t subtract = 131;
+            const auto dx = emit(207, vec2Type, { coordinate });
+            const auto dy = emit(208, vec2Type, { coordinate });
             const auto sample = [&](std::uint32_t op, std::uint32_t step)
             {
                 const auto uv = emit(op, vec2Type, { result, step });
-                return emit(87, colorType, { sampledImage, uv }); // OpImageSampleImplicitLod
+                return emit(87, colorType, { sampledImage, uv });
             };
             const auto right = sample(add, dx);
             const auto left = sample(subtract, dx);
@@ -396,9 +396,9 @@ namespace
             const auto twiceCenter = emit(add, colorType, { color, color });
             const auto fourTimesCenter = emit(add, colorType, { twiceCenter, twiceCenter });
             const auto detail = emit(subtract, colorType, { fourTimesCenter, neighbors });
-            const auto correction = emit(142, colorType, { detail, strengthId }); // OpVectorTimesScalar
+            const auto correction = emit(142, colorType, { detail, strengthId });
             const auto sharpened = emit(add, colorType, { color, correction });
-            const auto rgbWithOriginalAlpha = emit(79, colorType, { sharpened, color, 0, 1, 2, 7 }); // OpVectorShuffle
+            const auto rgbWithOriginalAlpha = emit(79, colorType, { sharpened, color, 0, 1, 2, 7 });
 
             patched[outputStore + constantWords + operationWords + 2] = rgbWithOriginalAlpha;
             patched.insert(patched.begin() + replacedSample + 5, filter.begin(), filter.end());
@@ -753,8 +753,8 @@ namespace
                     Logger::Log("[WARNING] ExpandSSRCoverage: Vulkan rejected presentation crop; original shader retained.");
             }
         }
-        // Keep the original camera composite in normal mode. The transition
-        // override is retained for the existing shader diagnostic modes.
+
+
         const int testMode = overscanCropTestMode.load(std::memory_order_relaxed);
         if (overscanCropEnabled.load(std::memory_order_acquire) && testMode >= 3 && testMode != 4)
         {

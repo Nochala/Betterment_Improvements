@@ -981,7 +981,8 @@ namespace Main
 
     void Initialize(const GameplayFixes::Settings& settings)
     {
-        DisableVignette::Update(settings.enabled && settings.disableVignette);
+        TimecycleEffects::Update(settings.enabled && settings.disableVignette,
+            settings.enabled && settings.disableBloom);
         Audio::Initialize(settings.enabled && settings.disableAmbientMusic,
             settings.enabled && settings.disableCombatMusic,
             settings.enabled && settings.disableWantedMusic);
@@ -1079,7 +1080,8 @@ namespace Main
         Lighting::Update();
         Camera::Update();
         WaterReflections::UpdateOverscanDiagnostics();
-        DisableVignette::Update(settings.enabled && settings.disableVignette);
+        TimecycleEffects::Update(settings.enabled && settings.disableVignette,
+            settings.enabled && settings.disableBloom);
         Horse::Update();
         Player::Update();
         Gunz::Update();

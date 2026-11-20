@@ -2,6 +2,7 @@
 
 #include "../../Headers/Logger.h"
 #include <windows.h>
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -9,7 +10,7 @@
 #include <cstring>
 #include <unordered_map>
 
-namespace Main::DisableVignette
+namespace Main::TimecycleEffects
 {
     struct RecordArray
     {
@@ -88,7 +89,9 @@ namespace Main::DisableVignette
         unsigned int lastSeen;
     };
 
-    inline bool UpdateWeather(std::uintptr_t manager, bool enabled, bool pending)
+    template <std::uint32_t... Hashes>
+    bool UpdateWeather(std::uintptr_t manager, const char* name, bool enabled, bool pending,
+        const std::array<std::uint32_t, sizeof...(Hashes)>& fields)
     {
         if (!enabled && !pending)
             return false;
@@ -96,7 +99,7 @@ namespace Main::DisableVignette
         constexpr std::size_t maxWeatherRecords = 64;
         constexpr std::size_t keyframeCount = 26;
         constexpr std::size_t fieldsPerKeyframe = 592;
-        constexpr std::size_t vignetteField = 0x1AD;
+
         constexpr std::size_t weatherIdOffset = keyframeCount * fieldsPerKeyframe * sizeof(std::uint16_t);
         constexpr std::size_t recordSize = weatherIdOffset + 0x20;
         static_assert(recordSize == 0x7860);
@@ -104,7 +107,7 @@ namespace Main::DisableVignette
         struct WeatherSnapshot
         {
             std::uint32_t id;
-            std::array<std::uint16_t, keyframeCount> intensity;
+            std::array<std::array<std::uint16_t, keyframeCount>, sizeof...(Hashes)> intensity;
         };
 
         const auto base = manager - 0x04A96E80;
@@ -146,45 +149,48 @@ namespace Main::DisableVignette
             if (!id)
                 continue;
 
-            for (std::size_t keyframe = 0; keyframe < keyframeCount; ++keyframe)
+            for (std::size_t field = 0; field < fields.size(); ++field)
             {
-                const auto offset = (keyframe * fieldsPerKeyframe + vignetteField) * sizeof(std::uint16_t);
-                const auto address = recordAddress + offset;
-                std::uint16_t value = 0;
-                std::memcpy(&value, record.data() + offset, sizeof(value));
-
-                auto& snapshot = original.intensity[keyframe];
-                const bool nonzero = (value & 0x7FFFu) != 0;
-                if (!enabled && nonzero)
+                for (std::size_t keyframe = 0; keyframe < keyframeCount; ++keyframe)
                 {
-                    snapshot = 0;
-                    continue;
-                }
-                if (enabled ? !nonzero : snapshot == 0)
-                    continue;
+                    const auto offset = (keyframe * fieldsPerKeyframe + fields[field]) * sizeof(std::uint16_t);
+                    const auto address = recordAddress + offset;
+                    std::uint16_t value = 0;
+                    std::memcpy(&value, record.data() + offset, sizeof(value));
 
-                std::uintptr_t currentTable = 0;
-                std::uint32_t currentId = 0;
-                std::uint16_t currentValue = 0;
-                if (!Read(manager + 0x68, &currentTable, sizeof(currentTable)) || currentTable != table ||
-                    !Read(recordAddress + weatherIdOffset, &currentId, sizeof(currentId)) || currentId != id)
-                    break;
-                if (!Read(address, &currentValue, sizeof(currentValue)) || currentValue != value)
-                    continue;
+                    auto& snapshot = original.intensity[field][keyframe];
+                    const bool nonzero = (value & 0x7FFFu) != 0;
+                    if (!enabled && nonzero)
+                    {
+                        snapshot = 0;
+                        continue;
+                    }
+                    if (enabled ? !nonzero : snapshot == 0)
+                        continue;
 
-                MEMORY_BASIC_INFORMATION region{};
-                if (!VirtualQuery(reinterpret_cast<const void*>(address), &region, sizeof(region)) ||
-                    region.State != MEM_COMMIT || (region.Protect & PAGE_GUARD) ||
-                    (region.Protect & 0xFF) != PAGE_READWRITE)
-                    continue;
+                    std::uintptr_t currentTable = 0;
+                    std::uint32_t currentId = 0;
+                    std::uint16_t currentValue = 0;
+                    if (!Read(manager + 0x68, &currentTable, sizeof(currentTable)) || currentTable != table ||
+                        !Read(recordAddress + weatherIdOffset, &currentId, sizeof(currentId)) || currentId != id)
+                        break;
+                    if (!Read(address, &currentValue, sizeof(currentValue)) || currentValue != value)
+                        continue;
 
-                const std::uint16_t replacement = enabled ? 0 : snapshot;
-                SIZE_T written = 0;
-                if (WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address),
-                    &replacement, sizeof(replacement), &written) && written == sizeof(replacement))
-                {
-                    snapshot = enabled ? value : 0;
-                    ++changed;
+                    MEMORY_BASIC_INFORMATION region{};
+                    if (!VirtualQuery(reinterpret_cast<const void*>(address), &region, sizeof(region)) ||
+                        region.State != MEM_COMMIT || (region.Protect & PAGE_GUARD) ||
+                        (region.Protect & 0xFF) != PAGE_READWRITE)
+                        continue;
+
+                    const std::uint16_t replacement = enabled ? 0 : snapshot;
+                    SIZE_T written = 0;
+                    if (WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address),
+                        &replacement, sizeof(replacement), &written) && written == sizeof(replacement))
+                    {
+                        snapshot = enabled ? value : 0;
+                        ++changed;
+                    }
                 }
             }
         }
@@ -193,20 +199,22 @@ namespace Main::DisableVignette
         {
             char message[128]{};
             std::snprintf(message, sizeof(message), enabled ?
-                "[SUCCESS] DisableVignette: zeroed intensity in %u base-weather keyframes." :
-                "[SUCCESS] DisableVignette: restored intensity in %u base-weather keyframes.", changed);
+                "[SUCCESS] %s: zeroed %u base-weather intensity values." :
+                "[SUCCESS] %s: restored %u base-weather intensity values.", name, changed);
             Logger::Log(message);
         }
 
         for (const auto& weather : saved)
-            for (const auto value : weather.intensity)
-                if (value)
-                    return true;
+            for (const auto& field : weather.intensity)
+                for (const auto value : field)
+                    if (value)
+                        return true;
         return false;
     }
 
 
-    inline void Update(bool enabled)
+    template <std::uint32_t... Hashes>
+    void UpdateEffect(const char* name, bool enabled)
     {
         static std::unordered_map<std::uintptr_t, SavedIntensity> saved;
         static bool wasEnabled = false;
@@ -225,7 +233,9 @@ namespace Main::DisableVignette
             if (!reportedUnsupported)
             {
                 reportedUnsupported = true;
-                Logger::Log("[WARNING] DisableVignette: unsupported timecycle modifier manager.");
+                char message[128]{};
+                std::snprintf(message, sizeof(message), "[WARNING] %s: unsupported timecycle modifier manager.", name);
+                Logger::Log(message);
             }
             return;
         }
@@ -237,17 +247,74 @@ namespace Main::DisableVignette
         wasEnabled = enabled;
         nextUpdate = now + 2000;
 
-        constexpr std::uint32_t vignetteField = 0x1AD;
-        constexpr std::uint32_t vignetteHash = 0xC51C8494;
+        constexpr std::array<std::uint32_t, sizeof...(Hashes)> hashes{ Hashes... };
+        constexpr std::uint32_t fieldCount = 0x248;
+        struct FieldDescriptor
+        {
+            std::uint32_t index;
+            std::uint32_t hash;
+            std::uint8_t other[16];
+        };
+        static_assert(sizeof(FieldDescriptor) == 24);
+
         const auto base = manager - 0x04A96E80;
         std::uintptr_t registry = 0;
-        std::uint32_t field[2]{};
-        if (!Read(base + 0x059B76A0, &registry, sizeof(registry)) || registry != base + 0x03A83F90 ||
-            !Read(registry + vignetteField * 24, field, sizeof(field)) ||
-            field[0] != vignetteField || field[1] != vignetteHash)
+        std::uint32_t count = 0;
+        static std::array<FieldDescriptor, fieldCount> descriptors{};
+        if (!Read(base + 0x059B769C, &count, sizeof(count)) || count == 0 ||
+            !Read(base + 0x059B76A0, &registry, sizeof(registry)) || !registry)
             return;
 
-        weatherPending = UpdateWeather(manager, enabled, weatherPending);
+        if (count != fieldCount || registry != base + 0x03A83F90 ||
+            !Read(registry, descriptors.data(), sizeof(descriptors)))
+        {
+            static bool reportedRegistry = false;
+            if (!reportedRegistry)
+            {
+                reportedRegistry = true;
+                char message[160]{};
+                std::snprintf(message, sizeof(message),
+                    "[WARNING] %s: timecycle registry validation failed (fields=%u, expected=%u).",
+                    name, count, fieldCount);
+                Logger::Log(message);
+            }
+            return;
+        }
+
+        std::array<std::uint32_t, sizeof...(Hashes)> fields{};
+        fields.fill(fieldCount);
+        for (std::uint32_t i = 0; i < fieldCount; ++i)
+        {
+            if (descriptors[i].index != i)
+                continue;
+            for (std::size_t field = 0; field < hashes.size(); ++field)
+                if (descriptors[i].hash == hashes[field])
+                    fields[field] = i;
+        }
+        if (std::find(fields.begin(), fields.end(), fieldCount) != fields.end())
+        {
+            static bool reportedMissing = false;
+            if (!reportedMissing)
+            {
+                reportedMissing = true;
+                char message[128]{};
+                std::snprintf(message, sizeof(message), "[WARNING] %s: required timecycle fields were not found.", name);
+                Logger::Log(message);
+            }
+            return;
+        }
+
+        static bool reportedFields = false;
+        if (!reportedFields)
+        {
+            reportedFields = true;
+            char message[128]{};
+            std::snprintf(message, sizeof(message),
+                "[INFO] %s: resolved %zu timecycle intensity fields.", name, fields.size());
+            Logger::Log(message);
+        }
+
+        weatherPending = UpdateWeather<Hashes...>(manager, name, enabled, weatherPending, fields);
 
         static std::array<std::uintptr_t, 4096> modifiers{};
         RecordArray list{};
@@ -256,7 +323,7 @@ namespace Main::DisableVignette
             !Read(list.entries, modifiers.data(), list.count * sizeof(modifiers[0])))
             return;
 
-        static std::array<ModifierValue, 580> values{};
+        static std::array<ModifierValue, fieldCount> values{};
         unsigned int changed = 0;
         bool scanComplete = true;
         ++scan;
@@ -279,7 +346,7 @@ namespace Main::DisableVignette
             for (std::size_t j = 0; j < entries.count; ++j)
             {
                 const auto& value = values[j];
-                if (value.field != vignetteField)
+                if (std::find(fields.begin(), fields.end(), value.field) == fields.end())
                     continue;
 
                 const auto address = entries.entries + j * sizeof(values[0]);
@@ -356,9 +423,14 @@ namespace Main::DisableVignette
         {
             char message[128]{};
             std::snprintf(message, sizeof(message), enabled ?
-                "[SUCCESS] DisableVignette: zeroed intensity in %u loaded timecycle modifier records." :
-                "[SUCCESS] DisableVignette: restored intensity in %u loaded timecycle modifier records.", changed);
+                "[SUCCESS] %s: zeroed intensity in %u loaded timecycle modifier records." :
+                "[SUCCESS] %s: restored intensity in %u loaded timecycle modifier records.", name, changed);
             Logger::Log(message);
         }
+    }
+    inline void Update(bool vignetteEnabled, bool bloomEnabled)
+    {
+        UpdateEffect<0xC51C8494>("DisableVignette", vignetteEnabled);
+        UpdateEffect<0x5023E4B8, 0x2598D888>("DisableBloom", bloomEnabled);
     }
 }

@@ -23,7 +23,8 @@ namespace
     constexpr std::uint64_t clearFeedMessage = 0x2F901291EF177B02ULL;
     constexpr std::uint64_t getFeedMessageState = 0x59FA676177DBE4C9ULL;
     constexpr std::uint64_t toastChannel = 6;
-    constexpr std::uint32_t exitingFeedState = 5;
+    constexpr std::uint32_t completeFeedState = 6;
+    constexpr auto toastDuration = std::chrono::milliseconds(6500);
     constexpr std::uint64_t requestTextureDict = 0xC1BA29DF5631B0F8ULL;
     constexpr std::uint64_t hasTextureDictLoaded = 0x54D6900929CCF162ULL;
     constexpr std::uint64_t releaseTextureDict = 0x4ACA10A91F66F1E2ULL;
@@ -62,6 +63,7 @@ namespace
     Clock::time_point lastWarningShownAt{};
     bool initializedNotificationShown = false;
     std::deque<std::uint32_t> toastHandles;
+    Clock::time_point toastClearDeadline{};
     std::string startupShortcut;
     bool initialDelayStarted = false;
     bool textureRequested = false;
@@ -210,11 +212,12 @@ namespace
         nativeInit(getFeedMessageState);
         nativePush64(handle);
         const auto result = nativeCall();
-        return result && static_cast<std::uint32_t>(*result) < exitingFeedState;
+        return result && static_cast<std::uint32_t>(*result) < completeFeedState;
     }
 
     void TrackToast(std::uint64_t handle)
     {
+        toastClearDeadline = Clock::now() + toastDuration + std::chrono::seconds(1);
         toastHandles.erase(std::remove_if(toastHandles.begin(), toastHandles.end(), [](std::uint32_t item)
         {
             return !IsFeedMessageActive(item);
@@ -235,7 +238,7 @@ namespace
             return false;
 
         FeedDuration duration;
-        duration.fields[0] = 6500;
+        duration.fields[0] = toastDuration.count();
         duration.fields[6] = secondaryText;
         FeedInfo info;
         info.fields[1] = titleText;
@@ -267,8 +270,16 @@ namespace Main::NotifStats
     void Dismiss()
     {
         initializedNotificationShown = true;
-        if (toastHandles.empty())
+        const bool recentlyPosted = Clock::now() < toastClearDeadline;
+        toastClearDeadline = {};
+        if (!recentlyPosted && toastHandles.empty())
             return;
+
+        nativeInit(getCurrentFeedMessage);
+        nativePush64(toastChannel);
+        const auto current = nativeCall();
+        const bool ownsCurrent = current && std::find(toastHandles.begin(), toastHandles.end(),
+            static_cast<std::uint32_t>(*current)) != toastHandles.end();
 
         for (auto it = toastHandles.begin(); it != toastHandles.end();)
         {
@@ -284,14 +295,7 @@ namespace Main::NotifStats
             nativeCall();
             ++it;
         }
-        if (toastHandles.empty())
-            return;
-
-        nativeInit(getCurrentFeedMessage);
-        nativePush64(toastChannel);
-        const auto current = nativeCall();
-        if (current && std::find(toastHandles.begin(), toastHandles.end(),
-            static_cast<std::uint32_t>(*current)) != toastHandles.end())
+        if (recentlyPosted || ownsCurrent)
         {
             nativeInit(clearFeedChannel);
             nativePush64(toastChannel);
