@@ -10,7 +10,7 @@ A big project of mine that's deeply inspired by GTA IV Fusion Fix by ThirteenAG.
 ### Features
 - **See the [full feature list wiki](https://github.com/Nochala/Betterment_Improvements/wiki/Full-Feature-List) for all available options.**
 - **All features can be individually enabled or disabled through the `INI` fle or the in-game Fusion Fix Settings menu.**
-- **Many features replace & overlap other mods, view [Mods Covered in Betterment Improvements](https://github.com/Nochala/Betterment_Improvements/wiki/Mods-Covered-in-Betterment-Improvements) for more details.** 
+- **Many features replace & overlap other mods. View [Mods Covered in Betterment Improvements](https://github.com/Nochala/Betterment_Improvements/wiki/Mods-Covered-in-Betterment-Improvements) for more details.** 
 - **If you prefer another mod's implementation, simply disable the corresponding feature in `BettermentImprovements.ini` file or the in-game settings menu.**
 - **Development is still work in progress, some features are experimental.**
 
