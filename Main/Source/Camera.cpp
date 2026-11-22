@@ -96,8 +96,6 @@ namespace
     bool thirdPersonRecoilStatusReported = false;
     bool firstPersonNamedShakeDetected = false;
     bool thirdPersonNamedShakeDetected = false;
-    float recoilShakeAmplitudeScale = 0.5f;
-    float firstPersonRecoilShakeAmplitudeScale = 0.5f;
     ULONGLONG recoilReleaseUntil = 0;
     bool shakeReductionApplied = false;
     bool swayStopped = false;
@@ -516,8 +514,8 @@ namespace
                 {
                     detected = true;
                     Logger::Log(firstPerson ?
-                        "[DEBUG] ReduceFirstPersonWeaponRecoil: active named first-person recoil shake detected." :
-                        "[DEBUG] ReduceWeaponRecoil: active named third-person recoil shake detected.");
+                        "[DEBUG] DisableFirstPersonWeaponRecoil: active named first-person recoil shake detected." :
+                        "[DEBUG] DisableWeaponRecoil: active named third-person recoil shake detected.");
                 }
             }
             nativeInit(stopGameplayCamShakingWithName);
@@ -581,8 +579,7 @@ namespace Main::Camera
     void Initialize(bool active, bool fixFullscreenTabOut, bool minimizeOnTabOut, bool disableHeadBob, bool reduceCameraShake, bool reduceCameraSway,
         bool disableDrunkFilter, bool disableEagleEyeFilter, bool disableDeadEyeFilter,
         bool disableWeaponWheelFilter, bool disableLowHealthFilter,
-        bool reduceWeaponRecoil, float amplitudeScale,
-        bool reduceFirstPersonWeaponRecoil, float firstPersonAmplitudeScale)
+        bool disableWeaponRecoil, bool disableFirstPersonWeaponRecoil)
     {
         enabled = active;
         drunkFilterDisabled = disableDrunkFilter;
@@ -600,16 +597,13 @@ namespace Main::Camera
         headBobStatusReported = false;
         shakeReductionEnabled = reduceCameraShake;
         swayReductionEnabled = reduceCameraSway;
-        recoilReductionEnabled = reduceWeaponRecoil;
-        firstPersonRecoilReductionEnabled = reduceFirstPersonWeaponRecoil;
-        recoilShakeAmplitudeScale = amplitudeScale;
-        firstPersonRecoilShakeAmplitudeScale = firstPersonAmplitudeScale;
-        recoilReductionApplied = false;
+        ClearRecoilOverride();
+        recoilReductionEnabled = disableWeaponRecoil;
+        firstPersonRecoilReductionEnabled = disableFirstPersonWeaponRecoil;
         firstPersonRecoilStatusReported = false;
         thirdPersonRecoilStatusReported = false;
         firstPersonNamedShakeDetected = false;
         thirdPersonNamedShakeDetected = false;
-        recoilReleaseUntil = 0;
         shakeReductionApplied = false;
         swayStopped = false;
         swayStatusReported = false;
@@ -640,11 +634,9 @@ namespace Main::Camera
         if (swayReductionEnabled)
             Logger::Log("[INFO] ReduceCameraSway: enabled.");
         if (recoilReductionEnabled)
-            Logger::Log((std::string("[INFO] ReduceWeaponRecoil: third-person recoil shake scale=") +
-                std::to_string(recoilShakeAmplitudeScale) + ".").c_str());
+            Logger::Log("[INFO] DisableWeaponRecoil: third-person recoil suppression enabled.");
         if (firstPersonRecoilReductionEnabled)
-            Logger::Log((std::string("[INFO] ReduceFirstPersonWeaponRecoil: first-person recoil shake scale=") +
-                std::to_string(firstPersonRecoilShakeAmplitudeScale) + ".").c_str());
+            Logger::Log("[INFO] DisableFirstPersonWeaponRecoil: first-person recoil suppression enabled.");
     }
 
     bool NeedsFastUpdate()
@@ -847,13 +839,12 @@ namespace Main::Camera
                     recoilReleaseUntil = now + (firstPerson ? firstPersonRecoilReleaseMs : recoilReleaseMs);
                 if (aiming || now < recoilReleaseUntil)
                 {
-                    const float scale = firstPerson ? firstPersonRecoilShakeAmplitudeScale : recoilShakeAmplitudeScale;
                     if (!shakeReductionEnabled)
                     {
-                        SetShakeAmplitude(scale);
+                        SetShakeAmplitude(0.0f);
                         recoilReductionApplied = true;
                     }
-                    if (scale == 0.0f && now < recoilReleaseUntil)
+                    if (now < recoilReleaseUntil)
                     {
                         SuppressRecoilShakes(firstPerson);
                         if (InvokeBoolean(isGameplayCamShaking))
@@ -863,15 +854,15 @@ namespace Main::Camera
                             nativeCall();
                         }
                     }
-                    if (firstPerson && !firstPersonRecoilStatusReported && Logger::IsDebugEnabled())
+                    if (shooting && firstPerson && !firstPersonRecoilStatusReported && Logger::IsDebugEnabled())
                     {
                         firstPersonRecoilStatusReported = true;
-                        Logger::Log("[DEBUG] ReduceFirstPersonWeaponRecoil: firing detected; recoil native called (effect unverified).");
+                        Logger::Log("[DEBUG] DisableFirstPersonWeaponRecoil: firing detected; recoil native called (effect unverified).");
                     }
-                    else if (!firstPerson && !thirdPersonRecoilStatusReported && Logger::IsDebugEnabled())
+                    else if (shooting && !firstPerson && !thirdPersonRecoilStatusReported && Logger::IsDebugEnabled())
                     {
                         thirdPersonRecoilStatusReported = true;
-                        Logger::Log("[DEBUG] ReduceWeaponRecoil: firing detected; recoil native called (effect unverified).");
+                        Logger::Log("[DEBUG] DisableWeaponRecoil: firing detected; recoil native called (effect unverified).");
                     }
                 }
                 else if (recoilReductionApplied || recoilReleaseUntil != 0)

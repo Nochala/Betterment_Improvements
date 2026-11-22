@@ -2,6 +2,7 @@
 #include "../../Headers/Modules.h"
 #include "../../Headers/Audio.h"
 #include "../../Headers/Camera.h"
+#include "../../Headers/Display.h"
 #include "../../Headers/Gunz.h"
 #include "../../Headers/Horse.h"
 #include "../../Headers/Lighting.h"
@@ -35,11 +36,9 @@ namespace Main::ModReload
             L"ExtendPedMemoryLimits", L"ExtendStreamingPools", L"ExtendAssetPools",
             L"OptimizeStreamingMemory", L"TextureStreamingStutterFix", L"ImproveTextureStreaming",
             L"ExpandSSRCoverage", L"SSROverscanScale", L"SSROverscanTestMode",
-            L"CrashDiagnostics", L"DumpNativeHashes", L"CameraFOVOffset", L"EnableDLSSAutoExposure",
+            L"CrashDiagnostics", L"DumpNativeHashes", L"EnableDLSSAutoExposure",
             L"RemoveBlackBars", L"SkipIntroSplashes", L"SkipLegal", L"StraightToStoryMode",
-            L"DisableAutoAmmoPickup", L"DisableAutoReload", L"DisableDeadEyeAutoReload",
-            L"DisableEmptyAutoReload", L"DisableEmptyClipAutoReload", L"DisableForcedScope",
-            L"DisableArrowTrails", L"DisableHitmarkers", L"DisableReticleHighlighting"
+            L"DisableAutoAmmoPickup"
         };
         for (const wchar_t* restartKey : keys)
             if (matches(key, restartKey))
@@ -72,20 +71,12 @@ namespace Main::ModReload
         keepStartup(current.expandSsrCoverage, next.expandSsrCoverage);
         keepStartup(current.ssrOverscanScale, next.ssrOverscanScale);
         keepStartup(current.ssrOverscanTestMode, next.ssrOverscanTestMode);
-        keepStartup(current.cameraFovOffset, next.cameraFovOffset);
         keepStartup(current.enableDLSSAutoExposure, next.enableDLSSAutoExposure);
         keepStartup(current.skipIntroSplashes, next.skipIntroSplashes);
         keepStartup(current.skipLegal, next.skipLegal);
         keepStartup(current.straightToStoryMode, next.straightToStoryMode);
         keepStartup(current.noAutoAmmoPickup, next.noAutoAmmoPickup);
         keepStartup(current.removeBlackBars, next.removeBlackBars);
-        keepStartup(current.disableAutoReload, next.disableAutoReload);
-        keepStartup(current.disableDeadEyeAutoReload, next.disableDeadEyeAutoReload);
-        keepStartup(current.disableEmptyAutoReload, next.disableEmptyAutoReload);
-        keepStartup(current.disableArrowTrails, next.disableArrowTrails);
-        keepStartup(current.disableForcedScope, next.disableForcedScope);
-        keepStartup(current.disableHitmarkers, next.disableHitmarkers);
-        keepStartup(current.disableReticleHighlighting, next.disableReticleHighlighting);
 
         if (current.disableAmbientMusic != next.disableAmbientMusic ||
             current.disableCombatMusic != next.disableCombatMusic ||
@@ -111,10 +102,8 @@ namespace Main::ModReload
             current.disableDeadEyeFilter != next.disableDeadEyeFilter ||
             current.disableWeaponWheelFilter != next.disableWeaponWheelFilter ||
             current.disableLowHealthFilter != next.disableLowHealthFilter ||
-            current.reduceWeaponRecoil != next.reduceWeaponRecoil ||
-            current.recoilShakeAmplitudeScale != next.recoilShakeAmplitudeScale ||
-            current.reduceFirstPersonWeaponRecoil != next.reduceFirstPersonWeaponRecoil ||
-            current.firstPersonRecoilShakeAmplitudeScale != next.firstPersonRecoilShakeAmplitudeScale)
+            current.disableWeaponRecoil != next.disableWeaponRecoil ||
+            current.disableFirstPersonWeaponRecoil != next.disableFirstPersonWeaponRecoil)
         {
             Main::Camera::Initialize(next.enabled && next.disableIdleCamera,
                 next.enabled && next.fixFullscreenTabOut,
@@ -127,9 +116,8 @@ namespace Main::ModReload
                 next.enabled && next.disableDeadEyeFilter,
                 next.enabled && next.disableWeaponWheelFilter,
                 next.enabled && next.disableLowHealthFilter,
-                next.enabled && next.reduceWeaponRecoil, next.recoilShakeAmplitudeScale,
-                next.enabled && next.reduceFirstPersonWeaponRecoil,
-                next.firstPersonRecoilShakeAmplitudeScale);
+                next.enabled && next.disableWeaponRecoil,
+                next.enabled && next.disableFirstPersonWeaponRecoil);
         }
         if (current.noAutoHorseEquip != next.noAutoHorseEquip ||
             current.noAutoHorseHolster != next.noAutoHorseHolster ||
@@ -170,6 +158,23 @@ namespace Main::ModReload
             current.fixSelfDefenseHonorLoss != next.fixSelfDefenseHonorLoss ||
             current.fixSelfDefenseBounties != next.fixSelfDefenseBounties)
             Main::ReloadGameplay(next);
+        if (next.enabled && current.cameraFovOffset != next.cameraFovOffset)
+            Main::Display::ApplyCameraFovOffset(next.cameraFovOffset);
+        if (current.disableAutoReload != next.disableAutoReload ||
+            current.disableDeadEyeAutoReload != next.disableDeadEyeAutoReload ||
+            current.disableEmptyAutoReload != next.disableEmptyAutoReload ||
+            current.disableArrowTrails != next.disableArrowTrails ||
+            current.disableHitmarkers != next.disableHitmarkers ||
+            current.disableReticleHighlighting != next.disableReticleHighlighting)
+        {
+            Main::Gunz::ApplyRuntimeToggles(next.enabled && next.disableAutoReload,
+                next.enabled && next.disableDeadEyeAutoReload, next.enabled && next.disableEmptyAutoReload,
+                next.enabled && next.disableArrowTrails, next.enabled && next.disableHitmarkers,
+                next.enabled && next.disableReticleHighlighting);
+        }
+        if (current.disableForcedScope != next.disableForcedScope)
+            Main::Gunz::ApplyForcedScope(next.enabled && next.disableForcedScope);
+        Display::UpdateCompositeDithering(next.enabled && next.disableCompositeDithering);
         return restartRequired;
     }
 }

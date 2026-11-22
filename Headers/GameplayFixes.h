@@ -34,6 +34,8 @@ namespace GameplayFixes
         bool disableArrowTrails = false;
         bool disableReticleSpread = false;
         bool disableReticleSway = false;
+        bool disableWeaponRecoil = false;
+        bool disableFirstPersonWeaponRecoil = false;
         bool disableForcedScope = true;
         bool disableWeaponDegradation = false;
         bool disableHitmarkers = false;
@@ -56,6 +58,8 @@ namespace GameplayFixes
         bool removeBlackBars = false;
         bool disableVignette = false;
         bool disableBloom = false;
+        bool disableChromaticAberration = false;
+        bool disableCompositeDithering = false;
         float cameraFovOffset = 0.0f;
         bool expandSsrCoverage = false;
         float ssrOverscanScale = 1.25f;
@@ -74,10 +78,6 @@ namespace GameplayFixes
         bool disableHeadBob = false;
         bool reduceCameraShake = false;
         bool reduceCameraSway = false;
-        bool reduceWeaponRecoil = false;
-        float recoilShakeAmplitudeScale = 0.5f;
-        bool reduceFirstPersonWeaponRecoil = false;
-        float firstPersonRecoilShakeAmplitudeScale = 0.5f;
         bool disableAmbientMusic = false;
         bool disableCombatMusic = false;
         bool disableWantedMusic = false;

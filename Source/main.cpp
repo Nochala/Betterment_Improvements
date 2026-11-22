@@ -5,6 +5,7 @@
 #include "../Headers/Version.h"
 #include "../Main/Headers/CrashFixes.h"
 #include "../Main/Headers/WaterReflections.h"
+#include "../Main/Headers/Display.h"
 #include "../Main/Headers/DLSS.h"
 #include "../Main/Headers/Camera.h"
 #include "../Main/Headers/Modules.h"
@@ -48,6 +49,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         Main::CrashFixes::ShutdownCrashDiagnostics();
         Main::CrashFixes::ShutdownPackfileLimits();
         Main::DLSS::Shutdown();
+        Main::Display::ShutdownCamera();
         Main::WaterReflections::Shutdown();
         Main::CrashFixes::ShutdownStreamingPoolOverride();
         Main::CrashFixes::ShutdownImproveTextureStreaming();

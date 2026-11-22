@@ -43,77 +43,6 @@ namespace
     std::atomic<bool> reportedTransitionFailure{ false };
 
     float overscanScale = 1.25f;
-    float cameraFovOffset = 0.0f;
-    float cameraFovScale = 1.0f;
-    bool overscanFovEnabled = false;
-    bool ssrCoverageEnabled = false;
-
-    constexpr unsigned int maxFovProbeSamples = 48;
-    struct FovProbeSample
-    {
-        std::atomic<bool> ready{ false };
-        ULONGLONG elapsedMs = 0;
-        float original = 0.0f;
-        float expanded = 0.0f;
-        std::uintptr_t camera = 0;
-        std::uintptr_t context = 0;
-    };
-    FovProbeSample fovProbeSamples[maxFovProbeSamples];
-    std::atomic<bool> fovProbeActive{ false };
-    std::atomic<unsigned int> fovProbeCalls{ 0 };
-    std::atomic<unsigned int> fovProbeCount{ 0 };
-    std::atomic<int> fovProbeLastBucket{ -999999 };
-    std::atomic<ULONGLONG> fovProbeLastCapture{ 0 };
-    ULONGLONG fovProbeStart = 0;
-    ULONGLONG fovProbeLastPoll = 0;
-    ULONGLONG fovProbeNextStatus = 10000;
-    unsigned int fovProbeReported = 0;
-
-    void CaptureFovProbe(float original, float expanded, std::uintptr_t camera, std::uintptr_t context)
-    {
-        if (!fovProbeActive.load(std::memory_order_acquire))
-            return;
-        fovProbeCalls.fetch_add(1, std::memory_order_relaxed);
-        if (!std::isfinite(original) || !std::isfinite(expanded) ||
-            original < 1.0f || original > 170.0f ||
-            fovProbeCount.load(std::memory_order_relaxed) >= maxFovProbeSamples)
-            return;
-        const int bucket = static_cast<int>(original / 2.0f);
-        if (bucket == fovProbeLastBucket.load(std::memory_order_relaxed))
-            return;
-        const ULONGLONG now = GetTickCount64();
-        ULONGLONG previous = fovProbeLastCapture.load(std::memory_order_relaxed);
-        if (now - previous < 200 ||
-            !fovProbeLastCapture.compare_exchange_strong(previous, now, std::memory_order_acq_rel))
-            return;
-        fovProbeLastBucket.store(bucket, std::memory_order_relaxed);
-        const unsigned int slot = fovProbeCount.fetch_add(1, std::memory_order_acq_rel);
-        if (slot >= maxFovProbeSamples)
-            return;
-        FovProbeSample& sample = fovProbeSamples[slot];
-        sample.elapsedMs = now - fovProbeStart;
-        sample.original = original;
-        sample.expanded = expanded;
-        sample.camera = camera;
-        sample.context = context;
-        sample.ready.store(true, std::memory_order_release);
-    }
-
-    bool IsReadableProjectionRange(const void* address, std::size_t bytes)
-    {
-        MEMORY_BASIC_INFORMATION region = {};
-        if (!VirtualQuery(address, &region, sizeof(region)) || region.State != MEM_COMMIT ||
-            (region.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
-            return false;
-        const DWORD protection = region.Protect & 0xff;
-        if (protection != PAGE_READWRITE && protection != PAGE_WRITECOPY &&
-            protection != PAGE_EXECUTE_READWRITE && protection != PAGE_EXECUTE_WRITECOPY &&
-            protection != PAGE_READONLY && protection != PAGE_EXECUTE_READ)
-            return false;
-        const std::uintptr_t start = reinterpret_cast<std::uintptr_t>(address);
-        const std::uintptr_t regionEnd = reinterpret_cast<std::uintptr_t>(region.BaseAddress) + region.RegionSize;
-        return regionEnd >= start && bytes <= regionEnd - start;
-    }
 
     std::uint64_t HashShader(const std::uint8_t* data, std::size_t length)
     {
@@ -759,7 +688,7 @@ namespace
         if (overscanCropEnabled.load(std::memory_order_acquire) && testMode >= 3 && testMode != 4)
         {
             std::vector<std::uint32_t> neutralized;
-            if (PatchCameraTransitionShader(info, neutralized))
+            if (info && PatchCameraTransitionShader(info, neutralized))
             {
                 transitionShaderMatches.fetch_add(1);
                 ShaderModuleCreateInfo modified = *info;
@@ -851,296 +780,6 @@ namespace
         return address;
     }
 
-    constexpr std::uint32_t fovConstructorCallRva = 0x003182AFu;
-    constexpr std::uint32_t fovConstructorRva = 0x026F50E4u;
-    constexpr std::uint32_t fovWriteRva = 0x026F518Cu;
-    constexpr std::uint32_t fovInputRva = 0x026F5108u;
-    constexpr std::uint32_t fovProjectionReadRva = 0x026F658Au;
-    constexpr std::uint8_t originalFovProjectionRead[] = { 0xF3, 0x0F, 0x10, 0x83, 0x4C, 0x06, 0x00, 0x00 };
-    constexpr std::uint8_t patchedFovProjectionRead[] = { 0xF3, 0x0F, 0x10, 0x83, 0x40, 0x06, 0x00, 0x00 };
-    std::uint8_t* fovProjectionReadSite = nullptr;
-    constexpr std::uint8_t originalFovWrite[] = { 0xF3, 0x0F, 0x11, 0xB9, 0x40, 0x06, 0x00, 0x00 };
-    constexpr std::uint8_t originalFovInput[] = { 0x0F, 0x28, 0xF9 };
-    constexpr std::size_t fovCallLength = 5;
-    std::uint8_t* fovCallSite = nullptr;
-    std::uint8_t originalFovCall[fovCallLength] = {};
-    std::uint8_t fovCallPatch[fovCallLength] = {};
-    void* fovRelay = nullptr;
-    float ExpandCameraFov(float original, std::uintptr_t camera, std::uintptr_t context)
-    {
-        if (!std::isfinite(original) || original < 1.0f || original > 170.0f)
-        {
-            CaptureFovProbe(original, original, camera, context);
-            return original;
-        }
-        float result = original;
-        if (overscanFovEnabled)
-        {
-            constexpr float radiansPerDegree = 0.017453292519943295769f;
-            constexpr float degreesPerRadian = 57.295779513082320877f;
-            const float expanded = 2.0f * std::atan(std::tan(original * radiansPerDegree * 0.5f) *
-                overscanScale) * degreesPerRadian;
-            result = std::isfinite(expanded) && expanded < 175.0f ? expanded : original;
-        }
-        if (cameraFovOffset != 0.0f)
-        {
-            constexpr float radiansPerDegree = 0.017453292519943295769f;
-            constexpr float degreesPerRadian = 57.295779513082320877f;
-            const float adjusted = 2.0f * std::atan(std::tan(result * radiansPerDegree * 0.5f) *
-                cameraFovScale) * degreesPerRadian;
-            if (std::isfinite(adjusted) && adjusted >= 1.0f && adjusted < 175.0f)
-                result = adjusted;
-        }
-        CaptureFovProbe(original, result, camera, context);
-        return result;
-    }
-
-    void* AllocateFovRelay(std::uintptr_t target)
-    {
-        SYSTEM_INFO system = {};
-        GetSystemInfo(&system);
-        const std::uintptr_t granularity = system.dwAllocationGranularity;
-        const std::uintptr_t center = target & ~(granularity - 1u);
-        for (std::uintptr_t offset = 0; offset <= 0x40000000u; offset += granularity)
-        {
-            for (unsigned int side = 0; side < 2; ++side)
-            {
-                if (!offset && side)
-                    continue;
-                if (side == 0 && center > (std::numeric_limits<std::uintptr_t>::max)() - offset)
-                    continue;
-                if (side == 1 && center < offset)
-                    continue;
-                const std::uintptr_t address = side ? center - offset : center + offset;
-                const std::int64_t distance = static_cast<std::int64_t>(address) -
-                    static_cast<std::int64_t>(target + 5);
-                if (distance < (std::numeric_limits<std::int32_t>::min)() ||
-                    distance > (std::numeric_limits<std::int32_t>::max)())
-                    continue;
-                void* block = VirtualAlloc(reinterpret_cast<void*>(address), 4096,
-                    MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-                if (block)
-                    return block;
-            }
-        }
-        return nullptr;
-    }
-
-    bool InstallOverscanFovHook(float scale)
-    {
-        const auto* base = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
-        if (!base)
-            return false;
-        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-        if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew < 0)
-            return false;
-        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-        if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
-            nt->FileHeader.TimeDateStamp != 0x65EEC92Eu || nt->OptionalHeader.SizeOfImage != 0x07397600u ||
-            fovConstructorCallRva > nt->OptionalHeader.SizeOfImage - fovCallLength ||
-            fovWriteRva > nt->OptionalHeader.SizeOfImage - sizeof(originalFovWrite) ||
-            fovInputRva > nt->OptionalHeader.SizeOfImage - sizeof(originalFovInput) ||
-            fovProjectionReadRva > nt->OptionalHeader.SizeOfImage - sizeof(originalFovProjectionRead))
-            return false;
-
-        auto* site = const_cast<std::uint8_t*>(base + fovConstructorCallRva);
-        const auto* fovInput = base + fovInputRva;
-        const auto* fovWrite = base + fovWriteRva;
-        const auto* projectionRead = base + fovProjectionReadRva;
-        if (!IsReadableProjectionRange(site, fovCallLength) ||
-            !IsReadableProjectionRange(fovInput, sizeof(originalFovInput)) ||
-            !IsReadableProjectionRange(fovWrite, sizeof(originalFovWrite)) ||
-            !IsReadableProjectionRange(projectionRead, sizeof(originalFovProjectionRead)) ||
-            site[0] != 0xE8 ||
-            std::memcmp(fovInput, originalFovInput, sizeof(originalFovInput)) != 0 ||
-            std::memcmp(fovWrite, originalFovWrite, sizeof(originalFovWrite)) != 0 ||
-            std::memcmp(projectionRead, originalFovProjectionRead, sizeof(originalFovProjectionRead)) != 0)
-            return false;
-
-        std::int32_t originalDisplacement = 0;
-        std::memcpy(&originalDisplacement, site + 1, sizeof(originalDisplacement));
-        const auto originalTarget = reinterpret_cast<std::uintptr_t>(site + fovCallLength) +
-            static_cast<std::intptr_t>(originalDisplacement);
-        if (originalTarget != reinterpret_cast<std::uintptr_t>(base + fovConstructorRva))
-            return false;
-
-        void* relay = AllocateFovRelay(reinterpret_cast<std::uintptr_t>(site));
-        if (!relay)
-            return false;
-
-        std::vector<std::uint8_t> code;
-        code.reserve(256);
-        const auto emit = [&code](std::initializer_list<std::uint8_t> bytes)
-        {
-            code.insert(code.end(), bytes.begin(), bytes.end());
-        };
-        const auto emitAddress = [&code](std::uintptr_t address)
-        {
-            const auto* bytes = reinterpret_cast<const std::uint8_t*>(&address);
-            code.insert(code.end(), bytes, bytes + sizeof(address));
-        };
-
-        emit({ 0x9C, 0x50, 0x51, 0x52, 0x41, 0x50, 0x41, 0x51, 0x41, 0x52, 0x41, 0x53, 0x55 });
-        emit({ 0x48, 0x89, 0xE5, 0x48, 0x83, 0xE4, 0xF0, 0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00 });
-        for (std::uint8_t index = 0; index < 6; ++index)
-            emit({ 0xF3, 0x0F, 0x7F, static_cast<std::uint8_t>(0x44 + index * 8),
-                0x24, static_cast<std::uint8_t>(0x20 + index * 16) });
-        emit({ 0x48, 0x89, 0xCA, 0x49, 0x89, 0xF8 });
-        emit({ 0xF3, 0x0F, 0x10, 0xC1, 0x48, 0xB8 });
-        emitAddress(reinterpret_cast<std::uintptr_t>(&ExpandCameraFov));
-        emit({ 0xFF, 0xD0, 0xF3, 0x0F, 0x11, 0x44, 0x24, 0x30 });
-        for (std::uint8_t index = 0; index < 6; ++index)
-            emit({ 0xF3, 0x0F, 0x6F, static_cast<std::uint8_t>(0x44 + index * 8),
-                0x24, static_cast<std::uint8_t>(0x20 + index * 16) });
-        emit({ 0x48, 0x89, 0xEC, 0x5D, 0x41, 0x5B, 0x41, 0x5A, 0x41, 0x59, 0x41, 0x58, 0x5A, 0x59,
-            0x58, 0x9D, 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00 });
-        emitAddress(originalTarget);
-
-        if (code.size() > 4096)
-        {
-            VirtualFree(relay, 0, MEM_RELEASE);
-            return false;
-        }
-        std::memcpy(relay, code.data(), code.size());
-        DWORD relayProtection = 0;
-        if (!VirtualProtect(relay, 4096, PAGE_EXECUTE_READ, &relayProtection) ||
-            !FlushInstructionCache(GetCurrentProcess(), relay, code.size()))
-        {
-            VirtualFree(relay, 0, MEM_RELEASE);
-            return false;
-        }
-
-        const std::int64_t displacement = static_cast<std::int64_t>(reinterpret_cast<std::uintptr_t>(relay)) -
-            static_cast<std::int64_t>(reinterpret_cast<std::uintptr_t>(site + fovCallLength));
-        if (displacement < (std::numeric_limits<std::int32_t>::min)() ||
-            displacement > (std::numeric_limits<std::int32_t>::max)())
-        {
-            VirtualFree(relay, 0, MEM_RELEASE);
-            return false;
-        }
-        const std::int32_t relative = static_cast<std::int32_t>(displacement);
-        std::uint8_t patch[fovCallLength] = { 0xE8, 0, 0, 0, 0 };
-        std::memcpy(patch + 1, &relative, sizeof(relative));
-        DWORD oldProtection = 0;
-        if (!VirtualProtect(site, sizeof(patch), PAGE_EXECUTE_READWRITE, &oldProtection))
-        {
-            VirtualFree(relay, 0, MEM_RELEASE);
-            return false;
-        }
-        if (site[0] != 0xE8 || std::memcmp(site + 1, &originalDisplacement, sizeof(originalDisplacement)) != 0)
-        {
-            DWORD ignored = 0;
-            VirtualProtect(site, sizeof(patch), oldProtection, &ignored);
-            VirtualFree(relay, 0, MEM_RELEASE);
-            return false;
-        }
-        overscanScale = scale;
-        std::memcpy(originalFovCall, site, fovCallLength);
-        std::memcpy(site, patch, sizeof(patch));
-        const bool flushed = FlushInstructionCache(GetCurrentProcess(), site, sizeof(patch)) != FALSE;
-        DWORD ignored = 0;
-        const bool restored = VirtualProtect(site, sizeof(patch), oldProtection, &ignored) != FALSE;
-        if (!flushed || !restored)
-        {
-            bool rolledBack = false;
-            DWORD writable = 0;
-            if (VirtualProtect(site, sizeof(patch), PAGE_EXECUTE_READWRITE, &writable))
-            {
-                if (std::memcmp(site, patch, sizeof(patch)) == 0)
-                {
-                    std::memcpy(site, originalFovCall, sizeof(originalFovCall));
-                    rolledBack = FlushInstructionCache(GetCurrentProcess(), site, sizeof(patch)) != FALSE;
-                }
-                VirtualProtect(site, sizeof(patch), oldProtection, &ignored);
-            }
-            if (rolledBack)
-                VirtualFree(relay, 0, MEM_RELEASE);
-            else
-            {
-                fovCallSite = site;
-                fovRelay = relay;
-                std::memcpy(fovCallPatch, patch, sizeof(patch));
-                Logger::Log("[WARNING] ExpandSSRCoverage: constructor call rollback could not be confirmed; relay retained for safety.");
-            }
-            return false;
-        }
-        fovCallSite = site;
-        fovRelay = relay;
-        std::memcpy(fovCallPatch, patch, sizeof(patch));
-        return true;
-    }
-
-    void RemoveOverscanFovHook()
-    {
-        if (!fovCallSite)
-            return;
-        DWORD protection = 0;
-        if (!VirtualProtect(fovCallSite, fovCallLength, PAGE_EXECUTE_READWRITE, &protection))
-            return;
-        const bool owned = std::memcmp(fovCallSite, fovCallPatch, sizeof(fovCallPatch)) == 0;
-        if (owned)
-        {
-            std::memcpy(fovCallSite, originalFovCall, sizeof(originalFovCall));
-            FlushInstructionCache(GetCurrentProcess(), fovCallSite, sizeof(originalFovCall));
-        }
-        DWORD ignored = 0;
-        VirtualProtect(fovCallSite, fovCallLength, protection, &ignored);
-        fovCallSite = nullptr;
-        if (owned && fovRelay)
-            VirtualFree(fovRelay, 0, MEM_RELEASE);
-        fovRelay = nullptr;
-    }
-
-    bool InstallOverscanProjectionPatch()
-    {
-        if (fovProjectionReadSite)
-            return false;
-        const auto* base = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
-        if (!base)
-            return false;
-        auto* site = const_cast<std::uint8_t*>(base + fovProjectionReadRva);
-        if (!IsReadableProjectionRange(site, sizeof(originalFovProjectionRead)) ||
-            std::memcmp(site, originalFovProjectionRead, sizeof(originalFovProjectionRead)) != 0)
-            return false;
-        DWORD protection = 0;
-        if (!VirtualProtect(site, sizeof(originalFovProjectionRead), PAGE_EXECUTE_READWRITE, &protection))
-            return false;
-        if (std::memcmp(site, originalFovProjectionRead, sizeof(originalFovProjectionRead)) != 0)
-        {
-            DWORD ignored = 0;
-            VirtualProtect(site, sizeof(originalFovProjectionRead), protection, &ignored);
-            return false;
-        }
-        site[4] = patchedFovProjectionRead[4];
-        fovProjectionReadSite = site;
-        const bool flushed = FlushInstructionCache(GetCurrentProcess(), site, sizeof(patchedFovProjectionRead)) != FALSE;
-        DWORD ignored = 0;
-        const bool restored = VirtualProtect(site, sizeof(patchedFovProjectionRead), protection, &ignored) != FALSE;
-        return flushed && restored &&
-            std::memcmp(site, patchedFovProjectionRead, sizeof(patchedFovProjectionRead)) == 0;
-    }
-
-    bool RemoveOverscanProjectionPatch()
-    {
-        if (!fovProjectionReadSite)
-            return true;
-        DWORD protection = 0;
-        if (!VirtualProtect(fovProjectionReadSite, sizeof(patchedFovProjectionRead), PAGE_EXECUTE_READWRITE, &protection))
-            return false;
-        const bool owned = std::memcmp(fovProjectionReadSite, patchedFovProjectionRead, sizeof(patchedFovProjectionRead)) == 0;
-        bool flushed = false;
-        if (owned)
-        {
-            fovProjectionReadSite[4] = originalFovProjectionRead[4];
-            flushed = FlushInstructionCache(GetCurrentProcess(), fovProjectionReadSite, sizeof(originalFovProjectionRead)) != FALSE;
-        }
-        DWORD ignored = 0;
-        const bool restored = VirtualProtect(fovProjectionReadSite, sizeof(originalFovProjectionRead), protection, &ignored) != FALSE;
-        if (restored && std::memcmp(fovProjectionReadSite, originalFovProjectionRead, sizeof(originalFovProjectionRead)) == 0)
-            fovProjectionReadSite = nullptr;
-        return owned && flushed && restored;
-    }
-
     bool InstallImportHook()
     {
         const auto base = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
@@ -1212,153 +851,38 @@ namespace WaterReflections
 {
     void ReportStartupStatus()
     {
-        if ((!importSlot.load() && !fovCallSite) || !Logger::IsDebugEnabled())
+        if (!overscanCropEnabled.load() || !Logger::IsDebugEnabled())
             return;
         char message[256] = {};
-        if (overscanCropEnabled.load())
-        {
-            std::snprintf(message, sizeof(message),
-                "ExpandSSRCoverage: fullscreen-copy candidate matches=%u, successful replacements=%u.",
-                presentationShaderMatches.load(), presentationShaderPatches.load());
-            Logger::Debug(message);
-            std::snprintf(message, sizeof(message),
-                "ExpandSSRCoverage: transition composite matches=%u, successful replacements=%u.",
-                transitionShaderMatches.load(), transitionShaderPatches.load());
-            Logger::Debug(message);
-        }
-        if (fovCallSite)
-        {
-            fovProbeStart = GetTickCount64();
-            fovProbeLastPoll = fovProbeStart;
-            fovProbeActive.store(true, std::memory_order_release);
-            Logger::Debug(ssrCoverageEnabled ?
-                "ExpandSSRCoverage: FOV probe active for 90s (no camera changes)." :
-                "CameraFOVOffset: FOV probe active for 90s (no camera changes).");
-        }
+        std::snprintf(message, sizeof(message),
+            "ExpandSSRCoverage: fullscreen-copy candidate matches=%u, successful replacements=%u.",
+            presentationShaderMatches.load(), presentationShaderPatches.load());
+        Logger::Debug(message);
+        std::snprintf(message, sizeof(message),
+            "ExpandSSRCoverage: transition composite matches=%u, successful replacements=%u.",
+            transitionShaderMatches.load(), transitionShaderPatches.load());
+        Logger::Debug(message);
     }
 
-    void UpdateOverscanDiagnostics()
+    bool InitializeOverscanCrop(float scale, int testMode)
     {
-        if (!fovProbeActive.load(std::memory_order_acquire))
-            return;
-        const ULONGLONG now = GetTickCount64();
-        if (now - fovProbeLastPoll < 500)
-            return;
-        fovProbeLastPoll = now;
-        unsigned int published = fovProbeCount.load(std::memory_order_acquire);
-        if (published > maxFovProbeSamples)
-            published = maxFovProbeSamples;
-        while (fovProbeReported < published &&
-            fovProbeSamples[fovProbeReported].ready.load(std::memory_order_acquire))
-        {
-            const FovProbeSample& sample = fovProbeSamples[fovProbeReported];
-            char message[256] = {};
-            std::snprintf(message, sizeof(message),
-                "%s: FOV sample #%u at +%llums original=%.3f adjusted=%.3f camera=%p context=%p.",
-                ssrCoverageEnabled ? "ExpandSSRCoverage" : "CameraFOVOffset",
-                fovProbeReported + 1, static_cast<unsigned long long>(sample.elapsedMs),
-                sample.original, sample.expanded, reinterpret_cast<void*>(sample.camera),
-                reinterpret_cast<void*>(sample.context));
-            Logger::Debug(message);
-            ++fovProbeReported;
-        }
-        const ULONGLONG elapsed = now - fovProbeStart;
-        if (elapsed >= fovProbeNextStatus || published >= maxFovProbeSamples || elapsed >= 90000)
-        {
-            char message[200] = {};
-            std::snprintf(message, sizeof(message),
-                "%s: FOV probe +%llums calls=%u captured=%u reported=%u.",
-                ssrCoverageEnabled ? "ExpandSSRCoverage" : "CameraFOVOffset",
-                static_cast<unsigned long long>(elapsed), fovProbeCalls.load(),
-                published, fovProbeReported);
-            Logger::Debug(message);
-            fovProbeNextStatus = elapsed + 10000;
-            if (published >= maxFovProbeSamples || elapsed >= 90000)
-                fovProbeActive.store(false, std::memory_order_release);
-        }
-    }
-
-    void InitializeOverscanFov(bool enabled, float scale, int testMode, float fovOffset)
-    {
-        if (!std::isfinite(fovOffset))
-            fovOffset = 0.0f;
-        cameraFovOffset = fovOffset < -3.0f ? -3.0f : fovOffset > 3.0f ? 3.0f : fovOffset;
-        cameraFovScale = std::pow(1.25f, cameraFovOffset);
-        if (!enabled && cameraFovOffset == 0.0f)
-            return;
-        ssrCoverageEnabled = enabled;
-        overscanFovEnabled = enabled && testMode < 3;
-        const bool constructorEnabled = overscanFovEnabled || cameraFovOffset != 0.0f;
-        const bool projectionEnabled = (enabled && (testMode == 0 || testMode == 2)) || cameraFovOffset != 0.0f;
-        const bool cropEnabled = enabled && (testMode == 0 || testMode >= 3);
         overscanScale = scale;
         overscanCropTestMode.store(testMode, std::memory_order_relaxed);
-        if (constructorEnabled && !InstallOverscanFovHook(overscanFovEnabled ? scale : 1.0f))
+        if (!importSlot.load() && !InstallImportHook())
         {
-            Logger::Log(enabled ?
-                "[WARNING] ExpandSSRCoverage: FOV constructor call hook rejected by build, instruction validation, or memory protection; no changes made." :
-                "[WARNING] CameraFOVOffset: FOV constructor call hook rejected by build, instruction validation, or memory protection; no changes made.");
-            return;
+            Logger::Log("[WARNING] ExpandSSRCoverage: Vulkan interception unavailable; final-image crop inactive.");
+            return false;
         }
-        if (projectionEnabled)
-        {
-            if (!InstallOverscanProjectionPatch())
-            {
-                if (!RemoveOverscanProjectionPatch())
-                    Logger::Log(enabled ?
-                        "[WARNING] ExpandSSRCoverage: projection patch rollback could not be confirmed." :
-                        "[WARNING] CameraFOVOffset: projection patch rollback could not be confirmed.");
-                RemoveOverscanFovHook();
-                Logger::Log(enabled ?
-                    "[WARNING] ExpandSSRCoverage: projection FOV read patch rejected; constructor hook rollback attempted." :
-                    "[WARNING] CameraFOVOffset: projection FOV read patch rejected; constructor hook rollback attempted.");
-                return;
-            }
-            Logger::Debug(enabled ?
-                "ExpandSSRCoverage: projection FOV read +0x026F658A changed from [rbx+0x64C] to [rbx+0x640]." :
-                "CameraFOVOffset: projection FOV read +0x026F658A changed from [rbx+0x64C] to [rbx+0x640].");
-        }
-        if (cropEnabled && (scale > 1.0f || testMode == 6))
-        {
-            if (importSlot.load() || InstallImportHook())
-            {
-                overscanCropEnabled.store(true, std::memory_order_release);
-                Logger::Debug("ExpandSSRCoverage: Vulkan crop hook ready.");
-            }
-            else
-                Logger::Log("[WARNING] ExpandSSRCoverage: Vulkan interception unavailable; final-image crop inactive.");
-        }
-        char message[256] = {};
-        if (enabled)
-        {
-            std::snprintf(message, sizeof(message),
-                "[INFO] ExpandSSRCoverage: mode=%d, constructor=%s, projection=%s, VulkanShader=%s, scale=%.3f; DX12 crop not implemented.",
-                testMode, fovCallSite ? "on" : "off", fovProjectionReadSite ? "on" : "off",
-                overscanCropEnabled.load() ? (testMode == 4 ? "pass-through" : testMode == 6 ? "identity" :
-                    testMode == 7 ? "flip-728" : testMode == 10 ? "flip-640" : "cropped") : "off",
-                testMode == 6 ? 1.0f : (testMode == 7 || testMode == 10) ? -1.0f :
-                    testMode == 8 ? 1.25f : testMode == 9 ? 1.5f : scale);
-            Logger::Log(message);
-        }
-        if (cameraFovOffset != 0.0f)
-        {
-            std::snprintf(message, sizeof(message),
-                "[INFO] CameraFOVOffset: strength=%+.2f, FOV scale=%.3f, constructor=%s, projection=%s.",
-                cameraFovOffset, cameraFovScale, fovCallSite ? "on" : "off", fovProjectionReadSite ? "on" : "off");
-            Logger::Log(message);
-        }
+
+        overscanCropEnabled.store(true, std::memory_order_release);
+        Logger::Debug("ExpandSSRCoverage: Vulkan crop hook ready.");
+        return true;
     }
 
     void Shutdown()
     {
-        fovProbeActive.store(false, std::memory_order_release);
         overscanCropEnabled.store(false, std::memory_order_release);
         overscanCropTestMode.store(0, std::memory_order_relaxed);
-        if (!RemoveOverscanProjectionPatch())
-            Logger::Log(ssrCoverageEnabled ?
-                "[WARNING] ExpandSSRCoverage: projection FOV read could not be restored during shutdown." :
-                "[WARNING] CameraFOVOffset: projection FOV read could not be restored during shutdown.");
-        RemoveOverscanFovHook();
         auto slot = importSlot.exchange(nullptr);
         const auto original = originalGetProcAddress.load();
         if (!slot || !original)

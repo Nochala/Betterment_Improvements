@@ -194,26 +194,6 @@ namespace
         return mask;
     }
 
-    float ParseSettingFloat(const wchar_t* value, float defaultValue)
-    {
-        wchar_t* end = nullptr;
-        const float parsed = std::wcstof(value, &end);
-        if (end == value || *end != L'\0' || !std::isfinite(parsed))
-            return defaultValue;
-        if (parsed < 0.0f)
-            return 0.0f;
-        if (parsed > 1.0f)
-            return 1.0f;
-        return parsed;
-    }
-
-    float ReadIniFloat(const std::wstring& path, const wchar_t* section, const wchar_t* key, float defaultValue)
-    {
-        const auto fallback = std::to_wstring(defaultValue);
-        const auto value = ReadIniString(path, section, key, fallback.c_str());
-        return ParseSettingFloat(value.c_str(), defaultValue);
-    }
-
     float ReadOverscanScale(const std::wstring& path)
     {
         wchar_t value[64] = {};
@@ -229,19 +209,24 @@ namespace
         return parsed;
     }
 
-    float ReadCameraFovOffset(const std::wstring& path)
+    float ParseCameraFovOffset(const wchar_t* value, float fallback)
     {
-        wchar_t value[64] = {};
-        GetPrivateProfileStringW(L"Visual", L"CameraFOVOffset", L"0.0", value, 64, path.c_str());
         wchar_t* end = nullptr;
         const float parsed = std::wcstof(value, &end);
         if (end == value || *end != L'\0' || !std::isfinite(parsed))
-            return 0.0f;
+            return fallback;
         if (parsed < -3.0f)
             return -3.0f;
         if (parsed > 3.0f)
             return 3.0f;
         return parsed;
+    }
+
+    float ReadCameraFovOffset(const std::wstring& path)
+    {
+        wchar_t value[64] = {};
+        GetPrivateProfileStringW(L"Visual", L"CameraFOVOffset", L"0.0", value, 64, path.c_str());
+        return ParseCameraFovOffset(value, 0.0f);
     }
 
     int ReadOverscanTestMode(const std::wstring& path)
@@ -584,6 +569,16 @@ namespace
             success = WriteIniValue(path, L"Weapons", L"DisableReticleSway", L"false", "Weapons.DisableReticleSway") && success;
 
         existing[0] = L'\0';
+        GetPrivateProfileStringW(L"Weapons", L"DisableWeaponRecoil", L"", existing, 8, path.c_str());
+        if (existing[0] == L'\0')
+            success = WriteIniValue(path, L"Weapons", L"DisableWeaponRecoil", L"false", "Weapons.DisableWeaponRecoil") && success;
+
+        existing[0] = L'\0';
+        GetPrivateProfileStringW(L"Weapons", L"DisableFirstPersonWeaponRecoil", L"", existing, 8, path.c_str());
+        if (existing[0] == L'\0')
+            success = WriteIniValue(path, L"Weapons", L"DisableFirstPersonWeaponRecoil", L"false", "Weapons.DisableFirstPersonWeaponRecoil") && success;
+
+        existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableForcedScope", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Weapons", L"DisableForcedScope", L"true", "Weapons.DisableForcedScope") && success;
@@ -633,6 +628,16 @@ namespace
             success = WriteIniValue(path, L"Visual", L"DisableBloom", L"false", "Visual.DisableBloom") && success;
 
         existing[0] = L'\0';
+        GetPrivateProfileStringW(L"Visual", L"DisableChromaticAberration", L"", existing, 8, path.c_str());
+        if (existing[0] == L'\0')
+            success = WriteIniValue(path, L"Visual", L"DisableChromaticAberration", L"false", "Visual.DisableChromaticAberration") && success;
+
+        existing[0] = L'\0';
+        GetPrivateProfileStringW(L"Visual", L"DisableCompositeDithering", L"", existing, 8, path.c_str());
+        if (existing[0] == L'\0')
+            success = WriteIniValue(path, L"Visual", L"DisableCompositeDithering", L"false", "Visual.DisableCompositeDithering") && success;
+
+        existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"EnableDLSSAutoExposure", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Visual", L"EnableDLSSAutoExposure", L"false", "Visual.EnableDLSSAutoExposure") && success;
@@ -651,6 +656,12 @@ namespace
         {
             { L"Visual", L"RemoveCameraFade" },
             { L"Visual", L"DisableCameraSmoothing" },
+            { L"Visual", L"DisableFilmGrain" },
+            { L"Visual", L"DisablePauseMenuFilter" },
+            { L"Visual", L"ReduceWeaponRecoil" },
+            { L"Visual", L"RecoilShakeAmplitudeScale" },
+            { L"Visual", L"ReduceFirstPersonWeaponRecoil" },
+            { L"Visual", L"FirstPersonRecoilShakeAmplitudeScale" },
             { L"Diagnostics", L"DumpNativeHashes" },
             { L"Camera", L"RemoveCameraFade" },
             { L"Diagnostics", L"TraceCameraNatives" }
@@ -729,26 +740,6 @@ namespace
         GetPrivateProfileStringW(L"Visual", L"ReduceCameraSway", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Visual", L"ReduceCameraSway", L"false", "Visual.ReduceCameraSway") && success;
-
-        existing[0] = L'\0';
-        GetPrivateProfileStringW(L"Visual", L"ReduceWeaponRecoil", L"", existing, 8, path.c_str());
-        if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"ReduceWeaponRecoil", L"false", "Visual.ReduceWeaponRecoil") && success;
-
-        existing[0] = L'\0';
-        GetPrivateProfileStringW(L"Visual", L"RecoilShakeAmplitudeScale", L"", existing, 8, path.c_str());
-        if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"RecoilShakeAmplitudeScale", L"0.50", "Visual.RecoilShakeAmplitudeScale") && success;
-
-        existing[0] = L'\0';
-        GetPrivateProfileStringW(L"Visual", L"ReduceFirstPersonWeaponRecoil", L"", existing, 8, path.c_str());
-        if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"ReduceFirstPersonWeaponRecoil", L"false", "Visual.ReduceFirstPersonWeaponRecoil") && success;
-
-        existing[0] = L'\0';
-        GetPrivateProfileStringW(L"Visual", L"FirstPersonRecoilShakeAmplitudeScale", L"", existing, 8, path.c_str());
-        if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"FirstPersonRecoilShakeAmplitudeScale", L"0.50", "Visual.FirstPersonRecoilShakeAmplitudeScale") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Ambience", L"DisableAmbientMusic", L"", existing, 8, path.c_str());
@@ -919,6 +910,8 @@ namespace
         { L"Weapons", L"DisableArrowTrails", &GameplayFixes::Settings::disableArrowTrails, false },
         { L"Weapons", L"DisableReticleSpread", &GameplayFixes::Settings::disableReticleSpread, false },
         { L"Weapons", L"DisableReticleSway", &GameplayFixes::Settings::disableReticleSway, false },
+        { L"Weapons", L"DisableWeaponRecoil", &GameplayFixes::Settings::disableWeaponRecoil, false },
+        { L"Weapons", L"DisableFirstPersonWeaponRecoil", &GameplayFixes::Settings::disableFirstPersonWeaponRecoil, false },
         { L"Weapons", L"DisableForcedScope", &GameplayFixes::Settings::disableForcedScope, true },
         { L"Weapons", L"DisableWeaponDegradation", &GameplayFixes::Settings::disableWeaponDegradation, false },
         { L"Weapons", L"DisableHitmarkers", &GameplayFixes::Settings::disableHitmarkers, false },
@@ -941,6 +934,8 @@ namespace
         { L"Visual", L"RemoveBlackBars", &GameplayFixes::Settings::removeBlackBars, false },
         { L"Visual", L"DisableVignette", &GameplayFixes::Settings::disableVignette, false },
         { L"Visual", L"DisableBloom", &GameplayFixes::Settings::disableBloom, false },
+        { L"Visual", L"DisableChromaticAberration", &GameplayFixes::Settings::disableChromaticAberration, false },
+        { L"Visual", L"DisableCompositeDithering", &GameplayFixes::Settings::disableCompositeDithering, false },
         { L"Visual", L"EnableDLSSAutoExposure", &GameplayFixes::Settings::enableDLSSAutoExposure, false },
         { L"Visual", L"DisableInteriorLighting", &GameplayFixes::Settings::disableInteriorLighting, false },
         { L"Visual", L"DisableDistantLights", &GameplayFixes::Settings::disableDistantLights, false },
@@ -955,17 +950,10 @@ namespace
         { L"Visual", L"DisableHeadBob", &GameplayFixes::Settings::disableHeadBob, false },
         { L"Visual", L"ReduceCameraShake", &GameplayFixes::Settings::reduceCameraShake, false },
         { L"Visual", L"ReduceCameraSway", &GameplayFixes::Settings::reduceCameraSway, false },
-        { L"Visual", L"ReduceWeaponRecoil", &GameplayFixes::Settings::reduceWeaponRecoil, false },
-        { L"Visual", L"ReduceFirstPersonWeaponRecoil", &GameplayFixes::Settings::reduceFirstPersonWeaponRecoil, false },
         { L"Ambience", L"DisableAmbientMusic", &GameplayFixes::Settings::disableAmbientMusic, false },
         { L"Ambience", L"DisableCombatMusic", &GameplayFixes::Settings::disableCombatMusic, false },
         { L"Ambience", L"DisableWantedMusic", &GameplayFixes::Settings::disableWantedMusic, false },
         { L"Diagnostics", L"CrashDiagnostics", &GameplayFixes::Settings::crashDiagnostics, false },
-    };
-
-    constexpr SettingBinding<float> floatSettings[] = {
-        { L"Visual", L"RecoilShakeAmplitudeScale", &GameplayFixes::Settings::recoilShakeAmplitudeScale, 0.5f },
-        { L"Visual", L"FirstPersonRecoilShakeAmplitudeScale", &GameplayFixes::Settings::firstPersonRecoilShakeAmplitudeScale, 0.5f },
     };
 
     bool MatchesSetting(const wchar_t* first, const wchar_t* second)
@@ -991,16 +979,16 @@ namespace
             return true;
         }
 
+        if (MatchesSetting(section, L"Visual") && MatchesSetting(key, L"CameraFOVOffset"))
+        {
+            target.cameraFovOffset = ParseCameraFovOffset(value.c_str(), target.cameraFovOffset);
+            return true;
+        }
+
         for (const auto& option : booleanSettings)
             if (MatchesSetting(section, option.section) && MatchesSetting(key, option.key))
             {
                 target.*option.member = ParseBoolean(value.c_str(), target.*option.member);
-                return true;
-            }
-        for (const auto& option : floatSettings)
-            if (MatchesSetting(section, option.section) && MatchesSetting(key, option.key))
-            {
-                target.*option.member = ParseSettingFloat(value.c_str(), target.*option.member);
                 return true;
             }
         return false;
@@ -1010,8 +998,6 @@ namespace
     {
         for (const auto& option : booleanSettings)
             settings.*option.member = ReadIniBoolean(iniPath, option.section, option.key, option.defaultValue);
-        for (const auto& option : floatSettings)
-            settings.*option.member = ReadIniFloat(iniPath, option.section, option.key, option.defaultValue);
         settings.menuKey = ReadMenuKey(iniPath);
         settings.menuModifier = ParseMenuModifier(ReadIniString(iniPath, L"General", L"MenuModifier", L"none"));
         settings.ssrOverscanScale = ReadOverscanScale(iniPath);
@@ -1097,6 +1083,8 @@ namespace GameplayFixes
             ", RemoveBlackBars=" + (settings.removeBlackBars ? "true" : "false") +
             ", DisableVignette=" + (settings.disableVignette ? "true" : "false") +
             ", DisableBloom=" + (settings.disableBloom ? "true" : "false") +
+            ", DisableChromaticAberration=" + (settings.disableChromaticAberration ? "true" : "false") +
+            ", DisableCompositeDithering=" + (settings.disableCompositeDithering ? "true" : "false") +
             ", EnableDLSSAutoExposure=" + (settings.enableDLSSAutoExposure ? "true" : "false") +
             ", DisableInteriorLighting=" + (settings.disableInteriorLighting ? "true" : "false") +
             ", DisableDistantLights=" + (settings.disableDistantLights ? "true" : "false") +
@@ -1111,10 +1099,8 @@ namespace GameplayFixes
             ", DisableHeadBob=" + (settings.disableHeadBob ? "true" : "false") +
             ", ReduceCameraShake=" + (settings.reduceCameraShake ? "true" : "false") +
             ", ReduceCameraSway=" + (settings.reduceCameraSway ? "true" : "false") +
-            ", ReduceWeaponRecoil=" + (settings.reduceWeaponRecoil ? "true" : "false") +
-            ", RecoilShakeAmplitudeScale=" + std::to_string(settings.recoilShakeAmplitudeScale) +
-            ", ReduceFirstPersonWeaponRecoil=" + (settings.reduceFirstPersonWeaponRecoil ? "true" : "false") +
-            ", FirstPersonRecoilShakeAmplitudeScale=" + std::to_string(settings.firstPersonRecoilShakeAmplitudeScale) +
+            ", DisableWeaponRecoil=" + (settings.disableWeaponRecoil ? "true" : "false") +
+            ", DisableFirstPersonWeaponRecoil=" + (settings.disableFirstPersonWeaponRecoil ? "true" : "false") +
             ", DisableAmbientMusic=" + (settings.disableAmbientMusic ? "true" : "false") +
             ", DisableCombatMusic=" + (settings.disableCombatMusic ? "true" : "false") +
             ", DisableWantedMusic=" + (settings.disableWantedMusic ? "true" : "false") +
@@ -1223,8 +1209,8 @@ namespace GameplayFixes
         return settings.enabled && (settings.disableDrunkFilter || settings.disableEagleEyeFilter ||
             settings.disableDeadEyeFilter || settings.disableWeaponWheelFilter ||
             settings.disableLowHealthFilter || settings.disableIdleCamera || settings.disableHeadBob || settings.reduceCameraShake ||
-            settings.reduceCameraSway || settings.reduceWeaponRecoil ||
-            settings.reduceFirstPersonWeaponRecoil || settings.disableReticleSpread || settings.disableReticleSway ||
+            settings.reduceCameraSway || settings.disableWeaponRecoil ||
+            settings.disableFirstPersonWeaponRecoil || settings.disableReticleSpread || settings.disableReticleSway ||
             settings.disableArrowTrails ||
             Main::Camera::NeedsFastUpdate() ||
             Main::Player::NeedsFastUpdate()) ? 0U :

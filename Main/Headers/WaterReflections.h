@@ -5,8 +5,7 @@ namespace Main
 namespace WaterReflections
 {
     void ReportStartupStatus();
-    void UpdateOverscanDiagnostics();
-    void InitializeOverscanFov(bool enabled, float scale, int testMode, float cameraFovOffset);
+    bool InitializeOverscanCrop(float scale, int testMode);
     void Shutdown();
 }
 }

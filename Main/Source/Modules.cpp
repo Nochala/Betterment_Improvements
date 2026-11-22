@@ -11,7 +11,7 @@
 #include "Looting.h"
 #include "Gunz.h"
 #include "WaterReflections.h"
-#include "DisableVignette.h"
+#include "../Headers/Display.h"
 #include "DLSS.h"
 #include "MissionState.h"
 #include "SelfDefense.h"
@@ -964,7 +964,7 @@ namespace Main
         CrashFixes::ExtendPackfileLimits(settings.enabled && settings.extendPackfileLimits);
         CrashFixes::ExtendPedMemoryLimits(settings.enabled && settings.extendPedMemoryLimits);
         CrashFixes::InitializeCrashDiagnostics(settings.enabled && settings.crashDiagnostics);
-        WaterReflections::InitializeOverscanFov(settings.enabled && settings.expandSsrCoverage,
+        Display::InitializeOverscanFov(settings.enabled, settings.enabled && settings.expandSsrCoverage,
             settings.ssrOverscanScale, settings.ssrOverscanTestMode,
             settings.enabled ? settings.cameraFovOffset : 0.0f);
         DLSS::Initialize(settings.enabled && settings.enableDLSSAutoExposure);
@@ -981,8 +981,10 @@ namespace Main
 
     void Initialize(const GameplayFixes::Settings& settings)
     {
-        TimecycleEffects::Update(settings.enabled && settings.disableVignette,
-            settings.enabled && settings.disableBloom);
+        Display::UpdateTimecycleEffects(settings.enabled && settings.disableVignette,
+            settings.enabled && settings.disableBloom,
+            settings.enabled && settings.disableChromaticAberration);
+        Display::UpdateCompositeDithering(settings.enabled && settings.disableCompositeDithering);
         Audio::Initialize(settings.enabled && settings.disableAmbientMusic,
             settings.enabled && settings.disableCombatMusic,
             settings.enabled && settings.disableWantedMusic);
@@ -1005,8 +1007,8 @@ namespace Main
             settings.enabled && settings.disableDeadEyeFilter,
             settings.enabled && settings.disableWeaponWheelFilter,
             settings.enabled && settings.disableLowHealthFilter,
-            settings.enabled && settings.reduceWeaponRecoil, settings.recoilShakeAmplitudeScale,
-            settings.enabled && settings.reduceFirstPersonWeaponRecoil, settings.firstPersonRecoilShakeAmplitudeScale);
+            settings.enabled && settings.disableWeaponRecoil,
+            settings.enabled && settings.disableFirstPersonWeaponRecoil);
         Horse::Initialize(settings.enabled && settings.noAutoHorseEquip,
             settings.enabled && settings.noAutoHorseHolster,
             settings.enabled && settings.disableHorseAutoJump,
@@ -1015,7 +1017,7 @@ namespace Main
         Player::Initialize(settings.enabled && settings.disableFirstPersonAutoRun,
             settings.enabled && settings.quickLootBodies,
             settings.enabled && settings.quickLootAnimals);
-        Gunz::Initialize(settings.enabled && settings.disableAutoReload,
+        Gunz::Initialize(settings.enabled, settings.enabled && settings.disableAutoReload,
             settings.enabled && settings.disableDeadEyeAutoReload,
             settings.enabled && settings.disableEmptyAutoReload,
             settings.enabled && settings.disableArrowTrails,
@@ -1049,6 +1051,7 @@ namespace Main
         if (disableAntagonizeHonorLoss)
             Logger::Log("[INFO] DisableAntagonizeHonorLoss: enabled outside missions.");
         WaterReflections::ReportStartupStatus();
+        Display::ReportCameraStartupStatus();
         DLSS::ReportStartupStatus();
     }
 
@@ -1079,9 +1082,10 @@ namespace Main
         }
         Lighting::Update();
         Camera::Update();
-        WaterReflections::UpdateOverscanDiagnostics();
-        TimecycleEffects::Update(settings.enabled && settings.disableVignette,
-            settings.enabled && settings.disableBloom);
+        Display::UpdateOverscanDiagnostics();
+        Display::UpdateTimecycleEffects(settings.enabled && settings.disableVignette,
+            settings.enabled && settings.disableBloom,
+            settings.enabled && settings.disableChromaticAberration);
         Horse::Update();
         Player::Update();
         Gunz::Update();

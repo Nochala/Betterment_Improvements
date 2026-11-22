@@ -187,14 +187,18 @@ namespace
     std::uintptr_t trackedScopePlayer = 0;
     ULONGLONG nextScopeRecordCheck = 0;
     bool scopeCarcanoPatched = false;
-    bool autoReloadDisabled = false;
-    bool deadEyeAutoReloadDisabled = false;
-    bool emptyAutoReloadDisabled = false;
+    std::atomic<bool> autoReloadDisabled{ false };
+    std::atomic<bool> deadEyeAutoReloadDisabled{ false };
+    std::atomic<bool> emptyAutoReloadDisabled{ false };
     bool arrowTrailsDisabled = false;
     bool arrowTrailFxApplied = false;
     bool reticleSpreadDisabled = false;
     bool reticleSwayDisabled = false;
     bool forcedScopeProbeEnabled = false;
+    bool forcedScopeRequested = false;
+    bool forcedScopeRestorePending = false;
+    bool forcedScopeRestoreWarned = false;
+    ULONGLONG nextForcedScopeRestore = 0;
     std::uint32_t scopeExcludedMissionHash = 0;
     ULONGLONG nextScopeMissionCheck = 0;
     ULONGLONG nextScopeMissionRestore = 0;
@@ -277,7 +281,7 @@ namespace
     int reticleAccuracyPed = 0;
     int previousReticleAccuracy = 0;
     bool reticleAccuracyOverridden = false;
-    bool emptyAutoReloadHooksReady = false;
+    std::atomic<bool> emptyAutoReloadHooksReady{ false };
     std::atomic<bool> emptyReloadSuppressionObserved{ false };
     bool emptyReloadSuppressionLogged = false;
     std::atomic<ULONGLONG> manualReloadAllowedUntil{ 0 };
@@ -291,8 +295,9 @@ namespace
     bool hitmarkersDisabled = false;
     bool reticleHighlightingDisabled = false;
     bool reticlePatchComplete = false;
-    bool reticleHitPatchFound = false;
-    bool reticleStylePatchFound = false;
+    std::uintptr_t reticleHitPatch = 0;
+    std::uintptr_t reticleStylePatch = 0;
+    ULONGLONG nextReticleValidation = 0;
     std::atomic<std::uintptr_t> reticleHitCandidate{ 0 };
     std::atomic<std::uintptr_t> reticleStyleCandidate{ 0 };
     std::atomic<bool> reticleWorkerStop{ false };
@@ -323,35 +328,29 @@ namespace
             protection == PAGE_EXECUTE_WRITECOPY;
     }
 
-    bool PatchReticleAction(std::uint8_t* bytes, const std::uint8_t* replacement, bool& found)
+    bool PatchReticleAction(std::uint8_t* bytes, const std::uint8_t* expected, const std::uint8_t* replacement)
     {
-        std::uint8_t current[sizeof(originalReticleAction)] = {};
+        std::uint8_t current[sizeof(originalReticleAction)]{};
         SIZE_T transferred = 0;
-        if (!ReadProcessMemory(GetCurrentProcess(), bytes, current, sizeof(current), &transferred) ||
-            transferred != sizeof(current))
-            return false;
-        if (std::memcmp(current, replacement, sizeof(current)) == 0)
-        {
-            found = true;
-            return true;
-        }
-        if (std::memcmp(current, originalReticleAction, sizeof(current)) != 0)
+        const auto process = GetCurrentProcess();
+        if (!ReadProcessMemory(process, bytes, current, sizeof(current), &transferred) ||
+            transferred != sizeof(current) || std::memcmp(current, expected, sizeof(current)) != 0)
             return false;
 
         DWORD previous = 0;
         if (!VirtualProtect(bytes, sizeof(current), PAGE_READWRITE, &previous))
             return false;
-        if (std::memcmp(bytes, originalReticleAction, sizeof(current)) == 0)
-        {
-            std::memcpy(bytes, replacement, sizeof(current));
-            found = true;
-        }
-        DWORD restored = 0;
-        VirtualProtect(bytes, sizeof(current), previous, &restored);
-        return found;
+        const bool written = ReadProcessMemory(process, bytes, current, sizeof(current), &transferred) &&
+            transferred == sizeof(current) && std::memcmp(current, expected, sizeof(current)) == 0 &&
+            WriteProcessMemory(process, bytes, replacement, sizeof(current), &transferred) &&
+            transferred == sizeof(current);
+        DWORD ignored = 0;
+        if (!VirtualProtect(bytes, sizeof(current), previous, &ignored))
+            Logger::Log("[WARNING] Reticle: could not restore GFX page protection.");
+        return written;
     }
 
-    bool MatchReticleCandidate(std::uintptr_t address, bool hitmarker)
+    bool MatchReticleCandidate(std::uintptr_t address, bool hitmarker, bool patchedOnly = false)
     {
         std::uint8_t bytes[80] = {};
         SIZE_T transferred = 0;
@@ -359,8 +358,8 @@ namespace
                 bytes, sizeof(bytes), &transferred) || transferred != sizeof(bytes))
             return false;
         const auto* replacement = hitmarker ? hitmarkerReticleAction : styleReticleAction;
-        if (std::memcmp(bytes, originalReticleAction, sizeof(originalReticleAction)) != 0 &&
-            std::memcmp(bytes, replacement, sizeof(originalReticleAction)) != 0)
+        if (std::memcmp(bytes, replacement, sizeof(originalReticleAction)) != 0 &&
+            (patchedOnly || std::memcmp(bytes, originalReticleAction, sizeof(originalReticleAction)) != 0))
             return false;
         if (hitmarker)
             return bytes[42] == 0x3E &&
@@ -486,23 +485,77 @@ namespace
         return 0;
     }
 
+    void RestoreReticleAction(std::uintptr_t& address, bool hitmarker)
+    {
+        if (!address)
+            return;
+        const auto* replacement = hitmarker ? hitmarkerReticleAction : styleReticleAction;
+        if (!MatchReticleCandidate(address, hitmarker, true))
+            address = 0;
+        else if (PatchReticleAction(reinterpret_cast<std::uint8_t*>(address), replacement, originalReticleAction))
+        {
+            address = 0;
+            Logger::Log(hitmarker ? "[SUCCESS] DisableHitmarkers: reticle GFX restored." :
+                "[SUCCESS] DisableReticleHighlighting: reticle GFX restored.");
+        }
+    }
+
+    void SetReticleActions(bool disableHitmarkers, bool disableReticleHighlighting)
+    {
+        if (hitmarkersDisabled == disableHitmarkers && reticleHighlightingDisabled == disableReticleHighlighting)
+            return;
+        hitmarkersDisabled = disableHitmarkers;
+        reticleHighlightingDisabled = disableReticleHighlighting;
+        reticlePatchComplete = false;
+        reticleWorkerStop.store(true, std::memory_order_release);
+        if (!hitmarkersDisabled)
+            RestoreReticleAction(reticleHitPatch, true);
+        if (!reticleHighlightingDisabled)
+            RestoreReticleAction(reticleStylePatch, false);
+    }
+
     void UpdateReticleActions()
     {
-        if (reticlePatchComplete)
+        if (!hitmarkersDisabled)
+            RestoreReticleAction(reticleHitPatch, true);
+        if (!reticleHighlightingDisabled)
+            RestoreReticleAction(reticleStylePatch, false);
+
+        const auto now = GetTickCount64();
+        if ((reticleHitPatch || reticleStylePatch) && now >= nextReticleValidation)
         {
-            if (reticleWorkerHandle && reticleWorkerFinished.load(std::memory_order_acquire))
+            nextReticleValidation = now + 1000;
+            if (hitmarkersDisabled && reticleHitPatch && !MatchReticleCandidate(reticleHitPatch, true, true))
             {
-                CloseHandle(reticleWorkerHandle);
-                reticleWorkerHandle = nullptr;
+                reticleHitPatch = 0;
+                reticlePatchComplete = false;
+                reticleWorkerStop.store(true, std::memory_order_release);
             }
-            return;
+            if (reticleHighlightingDisabled && reticleStylePatch && !MatchReticleCandidate(reticleStylePatch, false, true))
+            {
+                reticleStylePatch = 0;
+                reticlePatchComplete = false;
+                reticleWorkerStop.store(true, std::memory_order_release);
+            }
         }
-        if (!hitmarkersDisabled && !reticleHighlightingDisabled)
+
+        const bool needHit = hitmarkersDisabled && !reticleHitPatch;
+        const bool needStyle = reticleHighlightingDisabled && !reticleStylePatch;
+        if (reticleWorkerHandle && reticleWorkerStop.load(std::memory_order_acquire))
+        {
+            if (!reticleWorkerFinished.load(std::memory_order_acquire))
+                return;
+            CloseHandle(reticleWorkerHandle);
+            reticleWorkerHandle = nullptr;
+        }
+        if (reticlePatchComplete || (!needHit && !needStyle))
             return;
+
         if (!reticleWorkerHandle)
         {
-            const unsigned options = (hitmarkersDisabled ? 1U : 0U) |
-                (reticleHighlightingDisabled ? 2U : 0U);
+            const unsigned options = (needHit ? 1U : 0U) | (needStyle ? 2U : 0U);
+            reticleHitCandidate.store(0, std::memory_order_relaxed);
+            reticleStyleCandidate.store(0, std::memory_order_relaxed);
             reticleWorkerStop.store(false, std::memory_order_relaxed);
             reticleWorkerFinished.store(false, std::memory_order_relaxed);
             reticleWorkerHandle = CreateThread(nullptr, 0, &ScanReticleWorker,
@@ -517,46 +570,33 @@ namespace
             Logger::Log("[INFO] Reticle: background GFX scan started.");
         }
 
-        if (hitmarkersDisabled && !reticleHitPatchFound)
+        const auto apply = [](const std::atomic<std::uintptr_t>& candidate, std::uintptr_t& patch, bool hitmarker)
         {
-            const auto candidate = reticleHitCandidate.load(std::memory_order_acquire);
-            if (candidate && MatchReticleCandidate(candidate, true))
+            const auto address = candidate.load(std::memory_order_acquire);
+            const auto* replacement = hitmarker ? hitmarkerReticleAction : styleReticleAction;
+            if (address && MatchReticleCandidate(address, hitmarker) &&
+                PatchReticleAction(reinterpret_cast<std::uint8_t*>(address), originalReticleAction, replacement))
             {
-                bool matched = false;
-                if (PatchReticleAction(reinterpret_cast<std::uint8_t*>(candidate),
-                    hitmarkerReticleAction, matched) && matched)
-                {
-                    reticleHitPatchFound = true;
-                    Logger::Log("[SUCCESS] DisableHitmarkers: reticle GFX patched.");
-                }
+                patch = address;
+                Logger::Log(hitmarker ? "[SUCCESS] DisableHitmarkers: reticle GFX patched." :
+                    "[SUCCESS] DisableReticleHighlighting: reticle GFX patched.");
             }
-        }
-        if (reticleHighlightingDisabled && !reticleStylePatchFound)
-        {
-            const auto candidate = reticleStyleCandidate.load(std::memory_order_acquire);
-            if (candidate && MatchReticleCandidate(candidate, false))
-            {
-                bool matched = false;
-                if (PatchReticleAction(reinterpret_cast<std::uint8_t*>(candidate),
-                    styleReticleAction, matched) && matched)
-                {
-                    reticleStylePatchFound = true;
-                    Logger::Log("[SUCCESS] DisableReticleHighlighting: reticle GFX patched.");
-                }
-            }
-        }
-        if ((!hitmarkersDisabled || reticleHitPatchFound) &&
-            (!reticleHighlightingDisabled || reticleStylePatchFound))
+        };
+        if (needHit)
+            apply(reticleHitCandidate, reticleHitPatch, true);
+        if (needStyle)
+            apply(reticleStyleCandidate, reticleStylePatch, false);
+
+        if ((!needHit || reticleHitPatch) && (!needStyle || reticleStylePatch))
         {
             reticlePatchComplete = true;
-            reticleWorkerStop.store(true, std::memory_order_relaxed);
-            Logger::Log("[SUCCESS] Reticle: requested GFX patches applied.");
+            reticleWorkerStop.store(true, std::memory_order_release);
         }
         else if (reticleWorkerFinished.load(std::memory_order_acquire))
         {
-            if (hitmarkersDisabled && !reticleHitPatchFound)
+            if (needHit && !reticleHitPatch)
                 Logger::Log("[WARNING] DisableHitmarkers: reticle GFX action was not patched.");
-            if (reticleHighlightingDisabled && !reticleStylePatchFound)
+            if (needStyle && !reticleStylePatch)
                 Logger::Log("[WARNING] DisableReticleHighlighting: reticle GFX action was not patched.");
             reticlePatchComplete = true;
             CloseHandle(reticleWorkerHandle);
@@ -1166,8 +1206,12 @@ namespace
 
     void UpdateArrowTrails()
     {
-        if (arrowTrailsDisabled && IsArrowTrailWorldReady())
+        if ((!arrowTrailsDisabled && !arrowTrailFxApplied) || !IsArrowTrailWorldReady())
+            return;
+        if (arrowTrailsDisabled)
             arrowTrailFxApplied = ApplyArrowTrailFx(disabledArrowTrailFx) || arrowTrailFxApplied;
+        else if (ApplyArrowTrailFx(defaultArrowTrailFx))
+            arrowTrailFxApplied = false;
     }
 
     void RestoreReticleAccuracy(int ped)
@@ -1595,6 +1639,11 @@ namespace
     {
         if (!address || !writtenMask)
             return true;
+        MEMORY_BASIC_INFORMATION allocation{};
+        if (VirtualQuery(reinterpret_cast<const void*>(address), &allocation, sizeof(allocation)) == sizeof(allocation) &&
+            allocation.State != MEM_COMMIT)
+            return true;
+
         std::uint8_t metadata[carcanoMetadataSize] = {};
         std::size_t length = 0;
         if (!ReadScopeProbeMemory(address, metadata, sizeof(metadata), length) ||
@@ -1735,22 +1784,31 @@ namespace
         InterlockedExchange64(&observedRareRollingInfo, 0);
     }
 
-    void RearmCarcanoObserver()
+    bool RearmCarcanoObserver()
     {
         constexpr std::uint8_t instruction[] = { 0x8B, 0x88, 0xF4, 0x02, 0x00, 0x00 };
         if (rollingScopeObserver.address && !rollingScopeObserverFinished)
         {
             RestoreHook(rollingScopeObserver);
             if (std::memcmp(rollingScopeObserver.address, instruction, sizeof(instruction)) != 0)
-                return;
+                return false;
         }
         if (scopeInfoObserver.address)
         {
             if (!scopeInfoObserverFinished)
                 RestoreHook(scopeInfoObserver);
             if (std::memcmp(scopeInfoObserver.address, instruction, sizeof(instruction)) != 0)
-                return;
+                return false;
         }
+        const bool carcanoRestored = RestoreMissionScopeMetadata(
+            patchedCarcanoInfo, 0x53944780U, carcanoScopeFields, carcanoScopeWrittenMask);
+        const bool rollingRestored = RestoreMissionScopeMetadata(
+            patchedRollingInfo[0], 0xE1D2B317U, rollingScopeFields, rollingScopeWrittenMask[0]);
+        const bool rareRestored = RestoreMissionScopeMetadata(
+            patchedRollingInfo[1], 0x4E328256U, rollingScopeFields, rollingScopeWrittenMask[1]);
+        if (!carcanoRestored || !rollingRestored || !rareRestored)
+            return false;
+
         rollingScopeObserver.address = nullptr;
         rollingScopeObserver.length = 0;
         rollingScopeObserverAttempted = false;
@@ -1781,7 +1839,8 @@ namespace
         trackedScopePlayer = 0;
         scopeCarcanoPatched = false;
         InterlockedExchange64(&observedCarcanoInfo, 0);
-        Logger::Debug("DisableForcedScope: runtime weapon records reset; recapturing metadata.");
+        Logger::Debug("DisableForcedScope: runtime weapon records reset.");
+        return true;
     }
 
     bool UpdateScopeMission(ULONGLONG now)
@@ -1844,22 +1903,13 @@ namespace
             return true;
         }
 
-        const bool carcanoRestored = RestoreMissionScopeMetadata(
-            patchedCarcanoInfo, 0x53944780U, carcanoScopeFields, carcanoScopeWrittenMask);
-        const bool rollingRestored = RestoreMissionScopeMetadata(
-            patchedRollingInfo[0], 0xE1D2B317U, rollingScopeFields, rollingScopeWrittenMask[0]);
-        const bool rareRestored = RestoreMissionScopeMetadata(
-            patchedRollingInfo[1], 0x4E328256U, rollingScopeFields, rollingScopeWrittenMask[1]);
-        if (carcanoRestored && rollingRestored && rareRestored)
+        if (RearmCarcanoObserver())
         {
-            RearmCarcanoObserver();
-            if (!scopeInfoObserver.address)
-            {
-                scopeMissionRecordsRestored = true;
-                Logger::Debug("DisableForcedScope: FIN1 scope patch suspended; known rifle metadata restored where present.");
-                return true;
-            }
+            scopeMissionRecordsRestored = true;
+            Logger::Debug("DisableForcedScope: FIN1 scope patch suspended; known rifle metadata restored where present.");
+            return true;
         }
+
         if (!scopeMissionRestoreWarningLogged)
         {
             Logger::Log("[WARNING] DisableForcedScope: FIN1 metadata restore incomplete; retrying without new scope patches.");
@@ -1912,8 +1962,7 @@ namespace
 
         if (scopeInfoObserver.address)
         {
-            RearmCarcanoObserver();
-            if (scopeInfoObserver.address)
+            if (!RearmCarcanoObserver())
                 return false;
         }
         else
@@ -3073,8 +3122,74 @@ namespace
         return true;
     }
 
+    void EnableForcedScope()
+    {
+        forcedScopeProbeEnabled = true;
+        nextScopeProbeRefresh = 0;
+        nativeInit(getHashKey);
+        nativePush64(reinterpret_cast<std::uint64_t>("fin1"));
+        scopeExcludedMissionHash = static_cast<std::uint32_t>(*nativeCall());
+        nativeInit(getHashKey);
+        nativePush64(reinterpret_cast<std::uint64_t>("WEAPON_SNIPERRIFLE_CARCANO"));
+        carcanoWeapon = static_cast<std::uint32_t>(*nativeCall());
+        nativeInit(getHashKey);
+        nativePush64(reinterpret_cast<std::uint64_t>("WEAPON_SNIPERRIFLE_ROLLINGBLOCK"));
+        rollingBlockWeapon = static_cast<std::uint32_t>(*nativeCall());
+        nativeInit(getHashKey);
+        nativePush64(reinterpret_cast<std::uint64_t>("WEAPON_SNIPERRIFLE_ROLLINGBLOCK_EXOTIC"));
+        exoticRollingBlockWeapon = static_cast<std::uint32_t>(*nativeCall());
+        nativeInit(getHashKey);
+        nativePush64(reinterpret_cast<std::uint64_t>("COMPONENT_RIFLE_SCOPE02"));
+        shortScopeComponent = static_cast<std::uint32_t>(*nativeCall());
+        nativeInit(getHashKey);
+        nativePush64(reinterpret_cast<std::uint64_t>("COMPONENT_RIFLE_SCOPE04"));
+        longScopeComponent = static_cast<std::uint32_t>(*nativeCall());
+        if (!carcanoWeapon || !rollingBlockWeapon || !exoticRollingBlockWeapon ||
+            !shortScopeComponent || !longScopeComponent || !scopeExcludedMissionHash)
+        {
+            forcedScopeProbeEnabled = false;
+            Logger::Debug("DisableForcedScope: weapon/component hash initialization failed; diagnostic skipped.");
+        }
+        else
+            Logger::Debug("DisableForcedScope: runtime metadata patch enabled for Carcano and both Rolling Block variants.");
+    }
+
+    void UpdateForcedScopeToggle()
+    {
+        if (!forcedScopeRestorePending)
+            return;
+
+        const auto now = GetTickCount64();
+        if (now < nextForcedScopeRestore)
+            return;
+        nextForcedScopeRestore = now + 750;
+
+        if (RearmCarcanoObserver())
+        {
+            forcedScopeRestorePending = false;
+            forcedScopeRestoreWarned = false;
+            scopeMissionSuspended = false;
+            scopeMissionRecordsRestored = false;
+            scopeMissionRestoreWarningLogged = false;
+            scopeMissionInactiveSince = 0;
+            nextScopeMissionCheck = 0;
+            nextScopeMissionRestore = 0;
+            Logger::Log("[SUCCESS] DisableForcedScope: restored owned rifle metadata and stopped the observers.");
+            if (forcedScopeRequested)
+                EnableForcedScope();
+            return;
+        }
+
+        if (!forcedScopeRestoreWarned)
+        {
+            forcedScopeRestoreWarned = true;
+            Logger::Log("[WARNING] DisableForcedScope: restoration is incomplete; retrying without applying new patches.");
+        }
+    }
+
     void UpdateForcedScopeProbe()
     {
+        UpdateForcedScopeToggle();
         if (!forcedScopeProbeEnabled)
             return;
         const ULONGLONG now = GetTickCount64();
@@ -3240,47 +3355,20 @@ namespace Main
 {
     namespace Gunz
     {
-        void Initialize(bool disableAutoReload, bool disableDeadEyeAutoReload, bool disableEmptyAutoReload,
+        void Initialize(bool enabled, bool disableAutoReload, bool disableDeadEyeAutoReload, bool disableEmptyAutoReload,
             bool disableArrowTrails, bool disableReticleSpread, bool disableReticleSway, bool disableForcedScope,
             bool disableWeaponDegradation, bool disableHitmarkers, bool disableReticleHighlighting)
         {
             weaponDegradationDisabled = disableWeaponDegradation;
             nextWeaponConditionRefresh = 0;
-            hitmarkersDisabled = disableHitmarkers;
-            reticleHighlightingDisabled = disableReticleHighlighting;
-            reticleWorkerStop.store(true, std::memory_order_release);
-            if (reticleWorkerHandle)
-            {
-                WaitForSingleObject(reticleWorkerHandle, INFINITE);
-                CloseHandle(reticleWorkerHandle);
-                reticleWorkerHandle = nullptr;
-            }
-            reticlePatchComplete = false;
-            reticleHitPatchFound = false;
-            reticleStylePatchFound = false;
-            reticleHitCandidate.store(0, std::memory_order_relaxed);
-            reticleStyleCandidate.store(0, std::memory_order_relaxed);
-            reticleWorkerFinished.store(false, std::memory_order_relaxed);
-            if (hitmarkersDisabled || reticleHighlightingDisabled)
-                Logger::Log("[INFO] Reticle: GFX scan enabled (experimental).");
             if (weaponDegradationDisabled)
                 Logger::Log("[INFO] DisableWeaponDegradation: weapon wear disabled.");
-            autoReloadDisabled = disableAutoReload;
-            deadEyeAutoReloadDisabled = disableDeadEyeAutoReload;
-            emptyAutoReloadDisabled = disableEmptyAutoReload;
-            if (arrowTrailsDisabled && !disableArrowTrails && arrowTrailFxApplied && IsArrowTrailWorldReady())
-                ApplyArrowTrailFx(defaultArrowTrailFx);
-            if (!disableArrowTrails)
-                arrowTrailFxApplied = false;
-            arrowTrailsDisabled = disableArrowTrails;
-            if (arrowTrailsDisabled)
-                Logger::Log("[INFO] DisableArrowTrails: enabled.");
             RestoreReticleAccuracy(reticleAccuracyPed);
             reticleSpreadDisabled = disableReticleSpread;
             reticleSwayDisabled = disableReticleSway;
             if (reticleSwayDisabled)
                 Logger::Log("[INFO] DisableReticleSway: enabled.");
-            forcedScopeProbeEnabled = disableForcedScope;
+            forcedScopeProbeEnabled = false;
             scopeExcludedMissionHash = 0;
             nextScopeMissionCheck = 0;
             nextScopeMissionRestore = 0;
@@ -3369,35 +3457,7 @@ namespace Main
             exoticRollingBlockWeapon = 0;
             shortScopeComponent = 0;
             longScopeComponent = 0;
-            if (forcedScopeProbeEnabled)
-            {
-                nativeInit(getHashKey);
-                nativePush64(reinterpret_cast<std::uint64_t>("fin1"));
-                scopeExcludedMissionHash = static_cast<std::uint32_t>(*nativeCall());
-                nativeInit(getHashKey);
-                nativePush64(reinterpret_cast<std::uint64_t>("WEAPON_SNIPERRIFLE_CARCANO"));
-                carcanoWeapon = static_cast<std::uint32_t>(*nativeCall());
-                nativeInit(getHashKey);
-                nativePush64(reinterpret_cast<std::uint64_t>("WEAPON_SNIPERRIFLE_ROLLINGBLOCK"));
-                rollingBlockWeapon = static_cast<std::uint32_t>(*nativeCall());
-                nativeInit(getHashKey);
-                nativePush64(reinterpret_cast<std::uint64_t>("WEAPON_SNIPERRIFLE_ROLLINGBLOCK_EXOTIC"));
-                exoticRollingBlockWeapon = static_cast<std::uint32_t>(*nativeCall());
-                nativeInit(getHashKey);
-                nativePush64(reinterpret_cast<std::uint64_t>("COMPONENT_RIFLE_SCOPE02"));
-                shortScopeComponent = static_cast<std::uint32_t>(*nativeCall());
-                nativeInit(getHashKey);
-                nativePush64(reinterpret_cast<std::uint64_t>("COMPONENT_RIFLE_SCOPE04"));
-                longScopeComponent = static_cast<std::uint32_t>(*nativeCall());
-                if (!carcanoWeapon || !rollingBlockWeapon || !exoticRollingBlockWeapon ||
-                    !shortScopeComponent || !longScopeComponent || !scopeExcludedMissionHash)
-                {
-                    forcedScopeProbeEnabled = false;
-                    Logger::Debug("DisableForcedScope: weapon/component hash initialization failed; diagnostic skipped.");
-                }
-                else
-                    Logger::Debug("DisableForcedScope: runtime metadata patch enabled for Carcano and both Rolling Block variants.");
-            }
+            ApplyForcedScope(disableForcedScope);
             shotgunShellAmmo = 0;
             incendiaryShellAmmo = 0;
             reticleAccuracyPed = 0;
@@ -3419,18 +3479,9 @@ namespace Main
                 else
                     Logger::Log("[INFO] DisableReticleSpread: reticle spread override enabled.");
             }
-            if (!emptyAutoReloadDisabled)
-                emptyAutoReloadHooksReady = false;
-            emptyReloadSuppressionObserved.store(false, std::memory_order_relaxed);
-            emptyReloadSuppressionLogged = false;
-            manualReloadAllowedUntil.store(0, std::memory_order_relaxed);
-            nextManualReloadPoll = 0;
-            nextManualReloadStateCheck = 0;
-            nextPlayerRefresh = 0;
-            playerAddress.store(0, std::memory_order_relaxed);
-            if (autoReloadDisabled || deadEyeAutoReloadDisabled || emptyAutoReloadDisabled)
-                Logger::Debug("Gunz: resolving enabled weapon signatures from runtime memory.");
-            if (emptyAutoReloadDisabled)
+            if (enabled)
+                Logger::Debug("Gunz: resolving runtime reload hooks.");
+            if (enabled)
             {
                 const bool clipInstalled = InstallHook(clipNeedsReload, clipNeedsReloadPattern,
                     sizeof(clipNeedsReloadPattern), 7,
@@ -3440,23 +3491,60 @@ namespace Main
                     reinterpret_cast<const void*>(&ShouldReloadHook), "DisableEmptyAutoReload (reload decision)");
                 emptyAutoReloadHooksReady = clipInstalled && decisionInstalled;
                 if (emptyAutoReloadHooksReady)
-                    Logger::Log("[SUCCESS] DisableEmptyAutoReload: automatic reload blocked; manual reload unchanged.");
+                    Logger::Debug("DisableEmptyAutoReload: both engine hooks ready.");
                 else
                     Logger::Log("[WARNING] DisableEmptyAutoReload: incomplete engine hook set; reload behavior left unchanged.");
-            }
-            if (autoReloadDisabled)
-            {
                 InstallHook(holster, holsterPattern, sizeof(holsterPattern), 5,
                     reinterpret_cast<const void*>(&HolsterHook), "DisableAutoReload (holstered weapons)",
                     holsterLegacyPattern, sizeof(holsterLegacyPattern), 7);
                 InstallHook(cover, coverPattern, sizeof(coverPattern), 5,
                     reinterpret_cast<const void*>(&CoverHook), "DisableAutoReload (cover)");
-            }
-            if (deadEyeAutoReloadDisabled)
                 InstallHook(deadEye, deadEyePattern, sizeof(deadEyePattern), 7,
                     reinterpret_cast<const void*>(&DeadEyeHook), "DisableDeadEyeAutoReload");
-            if (autoReloadDisabled || deadEyeAutoReloadDisabled || emptyAutoReloadDisabled)
-                Logger::Debug("Gunz: enabled weapon signature resolution complete.");
+            }
+            ApplyRuntimeToggles(disableAutoReload, disableDeadEyeAutoReload, disableEmptyAutoReload,
+                disableArrowTrails, disableHitmarkers, disableReticleHighlighting);
+        }
+
+        void ApplyForcedScope(bool enabled)
+        {
+            if (forcedScopeRequested == enabled)
+                return;
+            forcedScopeRequested = enabled;
+            if (enabled)
+            {
+                if (!forcedScopeRestorePending)
+                    EnableForcedScope();
+                return;
+            }
+
+            forcedScopeProbeEnabled = false;
+            forcedScopeRestorePending = true;
+            nextForcedScopeRestore = 0;
+            UpdateForcedScopeToggle();
+        }
+
+        void ApplyRuntimeToggles(bool disableAutoReload, bool disableDeadEyeAutoReload, bool disableEmptyAutoReload,
+            bool disableArrowTrails, bool disableHitmarkers, bool disableReticleHighlighting)
+        {
+            if (emptyAutoReloadDisabled != disableEmptyAutoReload)
+            {
+                emptyReloadSuppressionObserved.store(false, std::memory_order_relaxed);
+                emptyReloadSuppressionLogged = false;
+                manualReloadAllowedUntil.store(0, std::memory_order_relaxed);
+                nextManualReloadPoll = 0;
+                nextManualReloadStateCheck = 0;
+            }
+            autoReloadDisabled = disableAutoReload;
+            deadEyeAutoReloadDisabled = disableDeadEyeAutoReload;
+            emptyAutoReloadDisabled = disableEmptyAutoReload;
+            nextPlayerRefresh = 0;
+            if (arrowTrailsDisabled != disableArrowTrails)
+            {
+                arrowTrailsDisabled = disableArrowTrails;
+                UpdateArrowTrails();
+            }
+            SetReticleActions(disableHitmarkers, disableReticleHighlighting);
         }
 
         void ReloadRuntimeFeatures(bool disableReticleSpread, bool disableReticleSway, bool disableWeaponDegradation)
@@ -3519,8 +3607,7 @@ namespace Main
                 CloseHandle(reticleWorkerHandle);
                 reticleWorkerHandle = nullptr;
             }
-            hitmarkersDisabled = false;
-            reticleHighlightingDisabled = false;
+            SetReticleActions(false, false);
             reticlePatchComplete = true;
             weaponDegradationDisabled = false;
             nextWeaponConditionRefresh = 0;

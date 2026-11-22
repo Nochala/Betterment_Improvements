@@ -357,13 +357,6 @@ namespace
                     result.maxValue = 3.0f;
                     result.increment = 0.25f;
                 }
-                else if (Same(key, L"RecoilShakeAmplitudeScale") || Same(key, L"FirstPersonRecoilShakeAmplitudeScale"))
-                {
-                    result.type = ValueType::Number;
-                    result.minValue = 0.0f;
-                    result.maxValue = 1.0f;
-                    result.increment = 0.05f;
-                }
             }
         }
         return result;
@@ -373,9 +366,7 @@ namespace
     {
         static constexpr const wchar_t* keys[] =
         {
-            L"ExpandSSRCoverage", L"SSROverscanScale", L"SSROverscanTestMode",
-            L"ReduceWeaponRecoil", L"RecoilShakeAmplitudeScale",
-            L"ReduceFirstPersonWeaponRecoil", L"FirstPersonRecoilShakeAmplitudeScale"
+            L"ExpandSSRCoverage", L"SSROverscanScale", L"SSROverscanTestMode"
         };
         for (const wchar_t* experimentalKey : keys)
             if (Same(key, experimentalKey))
@@ -423,7 +414,7 @@ namespace
             { L"Player", L"DisableFirstPersonAutoRun", L"true" },
             { L"Player", L"QuickLootBodies", L"false" },
             { L"Player", L"QuickLootAnimals", L"false" },
-            { L"Weapons", L"DisableEmptyAutoReload", L"false" },
+            { L"Weapons", L"DisableEmptyAutoReload", L"true" },
             { L"Weapons", L"DisableAutoReload", L"true" },
             { L"Weapons", L"DisableDeadEyeAutoReload", L"true" },
             { L"Weapons", L"DisableForcedScope", L"true" },
@@ -432,10 +423,14 @@ namespace
             { L"Weapons", L"DisableArrowTrails", L"false" },
             { L"Weapons", L"DisableReticleSpread", L"false" },
             { L"Weapons", L"DisableReticleSway", L"false" },
+            { L"Weapons", L"DisableWeaponRecoil", L"false" },
+            { L"Weapons", L"DisableFirstPersonWeaponRecoil", L"false" },
             { L"Weapons", L"DisableWeaponDegradation", L"false" },
             { L"Visual", L"RemoveBlackBars", L"true" },
             { L"Visual", L"DisableVignette", L"false" },
             { L"Visual", L"DisableBloom", L"false" },
+            { L"Visual", L"DisableChromaticAberration", L"false" },
+            { L"Visual", L"DisableCompositeDithering", L"false" },
             { L"Visual", L"EnableDLSSAutoExposure", L"false" },
             { L"Visual", L"FixFullscreenTabOut", L"true" },
             { L"Visual", L"MinimizeOnTabOut", L"true" },
@@ -499,10 +494,14 @@ namespace
             { L"Weapons", L"DisableArrowTrails", "AIMING & EFFECTS" },
             { L"Weapons", L"DisableReticleSpread", "AIMING & EFFECTS" },
             { L"Weapons", L"DisableReticleSway", "AIMING & EFFECTS" },
+            { L"Weapons", L"DisableWeaponRecoil", "AIMING & EFFECTS" },
+            { L"Weapons", L"DisableFirstPersonWeaponRecoil", "AIMING & EFFECTS" },
             { L"Weapons", L"DisableWeaponDegradation", "MAINTENANCE" },
             { L"Visual", L"RemoveBlackBars", "DISPLAY" },
-            { L"Visual", L"DisableVignette", "DISPLAY" },
-            { L"Visual", L"DisableBloom", "DISPLAY" },
+            { L"Visual", L"DisableVignette", "Graphics" },
+            { L"Visual", L"DisableBloom", "Graphics" },
+            { L"Visual", L"DisableChromaticAberration", "Graphics" },
+            { L"Visual", L"DisableCompositeDithering", "Graphics" },
             { L"Visual", L"EnableDLSSAutoExposure", "DISPLAY" },
             { L"Visual", L"FixFullscreenTabOut", "DISPLAY" },
             { L"Visual", L"MinimizeOnTabOut", "DISPLAY" },
@@ -579,6 +578,14 @@ namespace
         }
         for (auto& section : sections)
         {
+            if (Same(section.name, L"Visual"))
+            {
+                std::stable_partition(section.entries.begin(), section.entries.end(), [&](const Entry& entry)
+                {
+                    const char* heading = SubcategoryName(section.name, entry.key);
+                    return heading && std::strcmp(heading, "Graphics") == 0;
+                });
+            }
             section.menuRows.reserve(section.entries.size() + 5);
             section.entryRows.reserve(section.entries.size());
             const char* previousHeading = nullptr;
@@ -958,7 +965,9 @@ namespace
             { L"RemoveOnlineTab", "Hides the Online tab from the front end." },
             { L"RemoveBlackBars", "Removes cinematic black bars where supported." },
             { L"DisableVignette", "Disables vignette from weather and timecycle modifiers." },
-            { L"DisableBloom", "Disables bloom and fog bloom from weather and timecycle modifiers." },
+            { L"DisableBloom", "Disables bloom from visual settings, weather, and timecycle modifiers." },
+            { L"DisableChromaticAberration", "Disables color fringing from weather and timecycle modifiers." },
+            { L"DisableCompositeDithering", "Disables blue-noise dithering in the final composite. This may make color banding visible." },
             { L"CameraFOVOffset", "Adjusts the camera field-of-view offset." },
             { L"EnableDLSSAutoExposure", "Enables automatic exposure handling for DLSS." },
             { L"DisableInteriorLighting", "Disables interior lighting effects." },
@@ -974,10 +983,6 @@ namespace
             { L"DisableHeadBob", "Removes camera bobbing from movement." },
             { L"ReduceCameraShake", "Reduces shake applied to the gameplay camera." },
             { L"ReduceCameraSway", "Reduces swaying motion applied to the camera." },
-            { L"ReduceWeaponRecoil", "Reduces camera recoil from firing weapons." },
-            { L"RecoilShakeAmplitudeScale", "Controls how strongly weapon recoil shakes the camera." },
-            { L"ReduceFirstPersonWeaponRecoil", "Reduces camera recoil in first-person view." },
-            { L"FirstPersonRecoilShakeAmplitudeScale", "Controls first-person recoil camera shake." },
             { L"DisableFirstPersonAutoRun", "Disables automatic running in first-person view." },
             { L"QuickLootBodies", "Shortens looting interactions with bodies." },
             { L"QuickLootAnimals", "Shortens looting interactions with animals." },
@@ -1003,6 +1008,8 @@ namespace
             { L"DisableArrowTrails", "Removes visible projectile trails from arrows." },
             { L"DisableReticleSpread", "Removes reticle expansion from weapon handling." },
             { L"DisableReticleSway", "Disables reticle sway." },
+            { L"DisableWeaponRecoil", "Suppresses weapon recoil camera shake in third-person view." },
+            { L"DisableFirstPersonWeaponRecoil", "Suppresses weapon recoil camera shake in first-person view." },
             { L"DisableForcedScope", "Prevents forced scope view for supported weapons." },
             { L"DisableWeaponDegradation", "Prevents weapons from degrading through use." },
             { L"DisableHitmarkers", "Hides the hitmarker feedback when shots connect." },
