@@ -94,6 +94,7 @@ namespace Main::ModReload
         if (current.disableIdleCamera != next.disableIdleCamera ||
             current.fixFullscreenTabOut != next.fixFullscreenTabOut ||
             current.minimizeOnTabOut != next.minimizeOnTabOut ||
+            current.disableCameraSmoothing != next.disableCameraSmoothing ||
             current.disableHeadBob != next.disableHeadBob ||
             current.reduceCameraShake != next.reduceCameraShake ||
             current.reduceCameraSway != next.reduceCameraSway ||
@@ -101,13 +102,12 @@ namespace Main::ModReload
             current.disableEagleEyeFilter != next.disableEagleEyeFilter ||
             current.disableDeadEyeFilter != next.disableDeadEyeFilter ||
             current.disableWeaponWheelFilter != next.disableWeaponWheelFilter ||
-            current.disableLowHealthFilter != next.disableLowHealthFilter ||
-            current.disableWeaponRecoil != next.disableWeaponRecoil ||
-            current.disableFirstPersonWeaponRecoil != next.disableFirstPersonWeaponRecoil)
+            current.disableLowHealthFilter != next.disableLowHealthFilter)
         {
             Main::Camera::Initialize(next.enabled && next.disableIdleCamera,
                 next.enabled && next.fixFullscreenTabOut,
                 next.enabled && next.minimizeOnTabOut,
+                next.enabled && next.disableCameraSmoothing,
                 next.enabled && next.disableHeadBob,
                 next.enabled && next.reduceCameraShake,
                 next.enabled && next.reduceCameraSway,
@@ -115,9 +115,7 @@ namespace Main::ModReload
                 next.enabled && next.disableEagleEyeFilter,
                 next.enabled && next.disableDeadEyeFilter,
                 next.enabled && next.disableWeaponWheelFilter,
-                next.enabled && next.disableLowHealthFilter,
-                next.enabled && next.disableWeaponRecoil,
-                next.enabled && next.disableFirstPersonWeaponRecoil);
+                next.enabled && next.disableLowHealthFilter);
         }
         if (current.noAutoHorseEquip != next.noAutoHorseEquip ||
             current.noAutoHorseHolster != next.noAutoHorseHolster ||

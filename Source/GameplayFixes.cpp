@@ -569,16 +569,6 @@ namespace
             success = WriteIniValue(path, L"Weapons", L"DisableReticleSway", L"false", "Weapons.DisableReticleSway") && success;
 
         existing[0] = L'\0';
-        GetPrivateProfileStringW(L"Weapons", L"DisableWeaponRecoil", L"", existing, 8, path.c_str());
-        if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableWeaponRecoil", L"false", "Weapons.DisableWeaponRecoil") && success;
-
-        existing[0] = L'\0';
-        GetPrivateProfileStringW(L"Weapons", L"DisableFirstPersonWeaponRecoil", L"", existing, 8, path.c_str());
-        if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableFirstPersonWeaponRecoil", L"false", "Weapons.DisableFirstPersonWeaponRecoil") && success;
-
-        existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableForcedScope", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Weapons", L"DisableForcedScope", L"true", "Weapons.DisableForcedScope") && success;
@@ -655,13 +645,14 @@ namespace
         const wchar_t* obsoleteSettings[][2] =
         {
             { L"Visual", L"RemoveCameraFade" },
-            { L"Visual", L"DisableCameraSmoothing" },
             { L"Visual", L"DisableFilmGrain" },
             { L"Visual", L"DisablePauseMenuFilter" },
             { L"Visual", L"ReduceWeaponRecoil" },
             { L"Visual", L"RecoilShakeAmplitudeScale" },
             { L"Visual", L"ReduceFirstPersonWeaponRecoil" },
             { L"Visual", L"FirstPersonRecoilShakeAmplitudeScale" },
+            { L"Weapons", L"DisableWeaponRecoil" },
+            { L"Weapons", L"DisableFirstPersonWeaponRecoil" },
             { L"Diagnostics", L"DumpNativeHashes" },
             { L"Camera", L"RemoveCameraFade" },
             { L"Diagnostics", L"TraceCameraNatives" }
@@ -725,6 +716,11 @@ namespace
         GetPrivateProfileStringW(L"Visual", L"MinimizeOnTabOut", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Visual", L"MinimizeOnTabOut", L"false", "Visual.MinimizeOnTabOut") && success;
+
+        existing[0] = L'\0';
+        GetPrivateProfileStringW(L"Visual", L"DisableCameraSmoothing", L"", existing, 8, path.c_str());
+        if (existing[0] == L'\0')
+            success = WriteIniValue(path, L"Visual", L"DisableCameraSmoothing", L"false", "Visual.DisableCameraSmoothing") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableHeadBob", L"", existing, 8, path.c_str());
@@ -910,8 +906,6 @@ namespace
         { L"Weapons", L"DisableArrowTrails", &GameplayFixes::Settings::disableArrowTrails, false },
         { L"Weapons", L"DisableReticleSpread", &GameplayFixes::Settings::disableReticleSpread, false },
         { L"Weapons", L"DisableReticleSway", &GameplayFixes::Settings::disableReticleSway, false },
-        { L"Weapons", L"DisableWeaponRecoil", &GameplayFixes::Settings::disableWeaponRecoil, false },
-        { L"Weapons", L"DisableFirstPersonWeaponRecoil", &GameplayFixes::Settings::disableFirstPersonWeaponRecoil, false },
         { L"Weapons", L"DisableForcedScope", &GameplayFixes::Settings::disableForcedScope, true },
         { L"Weapons", L"DisableWeaponDegradation", &GameplayFixes::Settings::disableWeaponDegradation, false },
         { L"Weapons", L"DisableHitmarkers", &GameplayFixes::Settings::disableHitmarkers, false },
@@ -947,6 +941,7 @@ namespace
         { L"Visual", L"DisableDeadEyeFilter", &GameplayFixes::Settings::disableDeadEyeFilter, false },
         { L"Visual", L"DisableWeaponWheelFilter", &GameplayFixes::Settings::disableWeaponWheelFilter, false },
         { L"Visual", L"DisableLowHealthFilter", &GameplayFixes::Settings::disableLowHealthFilter, false },
+        { L"Visual", L"DisableCameraSmoothing", &GameplayFixes::Settings::disableCameraSmoothing, false },
         { L"Visual", L"DisableHeadBob", &GameplayFixes::Settings::disableHeadBob, false },
         { L"Visual", L"ReduceCameraShake", &GameplayFixes::Settings::reduceCameraShake, false },
         { L"Visual", L"ReduceCameraSway", &GameplayFixes::Settings::reduceCameraSway, false },
@@ -1096,11 +1091,10 @@ namespace GameplayFixes
             ", DisableDeadEyeFilter=" + (settings.disableDeadEyeFilter ? "true" : "false") +
             ", DisableWeaponWheelFilter=" + (settings.disableWeaponWheelFilter ? "true" : "false") +
             ", DisableLowHealthFilter=" + (settings.disableLowHealthFilter ? "true" : "false") +
+            ", DisableCameraSmoothing=" + (settings.disableCameraSmoothing ? "true" : "false") +
             ", DisableHeadBob=" + (settings.disableHeadBob ? "true" : "false") +
             ", ReduceCameraShake=" + (settings.reduceCameraShake ? "true" : "false") +
             ", ReduceCameraSway=" + (settings.reduceCameraSway ? "true" : "false") +
-            ", DisableWeaponRecoil=" + (settings.disableWeaponRecoil ? "true" : "false") +
-            ", DisableFirstPersonWeaponRecoil=" + (settings.disableFirstPersonWeaponRecoil ? "true" : "false") +
             ", DisableAmbientMusic=" + (settings.disableAmbientMusic ? "true" : "false") +
             ", DisableCombatMusic=" + (settings.disableCombatMusic ? "true" : "false") +
             ", DisableWantedMusic=" + (settings.disableWantedMusic ? "true" : "false") +
@@ -1209,13 +1203,13 @@ namespace GameplayFixes
         return settings.enabled && (settings.disableDrunkFilter || settings.disableEagleEyeFilter ||
             settings.disableDeadEyeFilter || settings.disableWeaponWheelFilter ||
             settings.disableLowHealthFilter || settings.disableIdleCamera || settings.disableHeadBob || settings.reduceCameraShake ||
-            settings.reduceCameraSway || settings.disableWeaponRecoil ||
-            settings.disableFirstPersonWeaponRecoil || settings.disableReticleSpread || settings.disableReticleSway ||
+            settings.reduceCameraSway || settings.disableAutoReload || settings.disableEmptyAutoReload ||
+            settings.disableReticleSpread || settings.disableReticleSway ||
             settings.disableArrowTrails ||
             Main::Camera::NeedsFastUpdate() ||
             Main::Player::NeedsFastUpdate()) ? 0U :
             (settings.enabled && (settings.quickLootBodies || settings.quickLootAnimals ||
-            settings.disableFirstPersonAutoRun || settings.disableEmptyAutoReload ||
+            settings.disableFirstPersonAutoRun ||
             Main::Horse::NeedsFastUpdate() ||
             Main::NeedsMaskedGameplayUpdate() || Main::SelfDefense::NeedsFastUpdate()) ? 50U : 250U);
     }

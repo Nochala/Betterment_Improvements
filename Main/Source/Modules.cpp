@@ -999,6 +999,7 @@ namespace Main
         Camera::Initialize(settings.enabled && settings.disableIdleCamera,
             settings.enabled && settings.fixFullscreenTabOut,
             settings.enabled && settings.minimizeOnTabOut,
+            settings.enabled && settings.disableCameraSmoothing,
             settings.enabled && settings.disableHeadBob,
             settings.enabled && settings.reduceCameraShake,
             settings.enabled && settings.reduceCameraSway,
@@ -1006,9 +1007,7 @@ namespace Main
             settings.enabled && settings.disableEagleEyeFilter,
             settings.enabled && settings.disableDeadEyeFilter,
             settings.enabled && settings.disableWeaponWheelFilter,
-            settings.enabled && settings.disableLowHealthFilter,
-            settings.enabled && settings.disableWeaponRecoil,
-            settings.enabled && settings.disableFirstPersonWeaponRecoil);
+            settings.enabled && settings.disableLowHealthFilter);
         Horse::Initialize(settings.enabled && settings.noAutoHorseEquip,
             settings.enabled && settings.noAutoHorseHolster,
             settings.enabled && settings.disableHorseAutoJump,

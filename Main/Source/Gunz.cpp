@@ -17,8 +17,11 @@ namespace
     constexpr std::uint64_t getLoadingScreenActive = 0x71D4BF5890659B0CULL;
     constexpr std::uint64_t getGameTimer = 0x4F67E8ECA7D3F667ULL;
     constexpr std::uint64_t doesEntityExist = 0xD42BD6EB2E0F1677ULL;
-    constexpr std::uint64_t isControlPressed = 0xF3A21BCD95725A4AULL;
     constexpr std::uint64_t isPedReloading = 0x24B100C68C645951ULL;
+    constexpr std::uint64_t isControlPressed = 0xF3A21BCD95725A4AULL;
+    constexpr std::uint64_t isDisabledControlPressed = 0xE2587F8CBBD87B1DULL;
+    constexpr std::uint64_t isControlJustPressed = 0x580417101DDB492FULL;
+    constexpr std::uint64_t isDisabledControlJustPressed = 0x91AEF906BCA88877ULL;
     constexpr std::uint64_t setArrowTrailFx = 0x2EBF70E1D8C06683ULL;
     constexpr std::uint64_t getHashKey = 0xFD340785ADF8CFB7ULL;
     constexpr std::uint64_t getRunningScriptThreads = 0x8E34C953364A76DDULL;
@@ -285,8 +288,7 @@ namespace
     std::atomic<bool> emptyReloadSuppressionObserved{ false };
     bool emptyReloadSuppressionLogged = false;
     std::atomic<ULONGLONG> manualReloadAllowedUntil{ 0 };
-    ULONGLONG nextManualReloadPoll = 0;
-    ULONGLONG nextManualReloadStateCheck = 0;
+    thread_local bool reloadInputScriptThread = false;
     thread_local unsigned automaticReloadDepth = 0;
     std::atomic<std::uintptr_t> playerAddress{ 0 };
     ULONGLONG nextPlayerRefresh = 0;
@@ -3242,33 +3244,51 @@ namespace
 
     }
 
+    bool ReadReloadControl(std::uint64_t native)
+    {
+        nativeInit(native);
+        nativePush64(0);
+        nativePush64(reloadControl);
+        const auto* result = nativeCall();
+        return result && static_cast<std::uint32_t>(*result) != 0;
+    }
+
+    bool IsReloadInputActive()
+    {
+        static thread_local bool readingInput = false;
+        if (readingInput)
+            return false;
+
+        struct QueryScope
+        {
+            explicit QueryScope(bool& active) : active(active) { active = true; }
+            ~QueryScope() { active = false; }
+            bool& active;
+        };
+        const QueryScope query(readingInput);
+
+        return ReadReloadControl(isControlJustPressed) || ReadReloadControl(isDisabledControlJustPressed) ||
+            ReadReloadControl(isControlPressed) || ReadReloadControl(isDisabledControlPressed);
+    }
+
     void UpdateManualReloadInput()
     {
-        if (!emptyAutoReloadDisabled)
+        if (!(autoReloadDisabled && cover.gateway) && !(emptyAutoReloadDisabled && emptyAutoReloadHooksReady))
             return;
 
-        const ULONGLONG now = GetTickCount64();
-        if (now >= nextManualReloadPoll)
+        const auto now = GetTickCount64();
+        if (IsReloadInputActive())
+            manualReloadAllowedUntil.store(now + 500, std::memory_order_relaxed);
+        else if (now < manualReloadAllowedUntil.load(std::memory_order_relaxed))
         {
-            nextManualReloadPoll = now + 16;
-            nativeInit(isControlPressed);
-            nativePush64(0);
-            nativePush64(reloadControl);
-            if (static_cast<std::uint32_t>(*nativeCall()) != 0)
-                manualReloadAllowedUntil.store(now + 1800, std::memory_order_relaxed);
-            else if (now < manualReloadAllowedUntil.load(std::memory_order_relaxed) &&
-                now >= nextManualReloadStateCheck)
+            nativeInit(playerPedId);
+            const auto ped = static_cast<std::uint32_t>(*nativeCall());
+            if (ped)
             {
-                nextManualReloadStateCheck = now + 100;
-                nativeInit(playerPedId);
-                const int ped = static_cast<int>(*nativeCall());
-                if (ped)
-                {
-                    nativeInit(isPedReloading);
-                    nativePush64(static_cast<std::uint32_t>(ped));
-                    if (static_cast<std::uint32_t>(*nativeCall()) != 0)
-                        manualReloadAllowedUntil.store(now + 500, std::memory_order_relaxed);
-                }
+                nativeInit(isPedReloading);
+                nativePush64(ped);
+                if (static_cast<std::uint32_t>(*nativeCall()) != 0)
+                    manualReloadAllowedUntil.store(now + 500, std::memory_order_relaxed);
             }
         }
 
@@ -3331,14 +3351,25 @@ namespace
             original(context);
     }
 
-    void __fastcall CoverHook(void* context, std::uint8_t state)
+    bool __fastcall CoverHook(void* context, std::uint8_t state)
     {
-        if (autoReloadDisabled && context &&
-            IsPlayer(*reinterpret_cast<const std::uintptr_t*>(static_cast<const std::uint8_t*>(context) + 0x10)))
-            return;
-        auto original = reinterpret_cast<void(__fastcall*)(void*, std::uint8_t)>(cover.gateway);
-        if (original)
-            original(context, state);
+        auto original = reinterpret_cast<bool(__fastcall*)(void*, std::uint8_t)>(cover.gateway);
+        if (!original)
+            return false;
+        const auto* task = static_cast<const std::uint8_t*>(context);
+        if (!task || !IsPlayer(*reinterpret_cast<const std::uintptr_t*>(task + 0x10)))
+            return original(context, state);
+        if (autoReloadDisabled)
+        {
+            const auto now = GetTickCount64();
+            if (now >= manualReloadAllowedUntil.load(std::memory_order_relaxed))
+            {
+                if (!reloadInputScriptThread || !IsReloadInputActive())
+                    return false;
+                manualReloadAllowedUntil.store(now + 500, std::memory_order_relaxed);
+            }
+        }
+        return original(context, state);
     }
 
     void __fastcall DeadEyeHook(void* context)
@@ -3531,10 +3562,9 @@ namespace Main
             {
                 emptyReloadSuppressionObserved.store(false, std::memory_order_relaxed);
                 emptyReloadSuppressionLogged = false;
-                manualReloadAllowedUntil.store(0, std::memory_order_relaxed);
-                nextManualReloadPoll = 0;
-                nextManualReloadStateCheck = 0;
             }
+            if (autoReloadDisabled != disableAutoReload || emptyAutoReloadDisabled != disableEmptyAutoReload)
+                manualReloadAllowedUntil.store(0, std::memory_order_relaxed);
             autoReloadDisabled = disableAutoReload;
             deadEyeAutoReloadDisabled = disableDeadEyeAutoReload;
             emptyAutoReloadDisabled = disableEmptyAutoReload;
@@ -3578,6 +3608,7 @@ namespace Main
             UpdateArrowTrails();
             UpdateReticleSpread();
             UpdateForcedScopeProbe();
+            reloadInputScriptThread = true;
             UpdateManualReloadInput();
             if (!autoReloadDisabled && !deadEyeAutoReloadDisabled && !emptyAutoReloadDisabled)
                 return;
@@ -3714,8 +3745,6 @@ namespace Main
             reticleAccuracyOverridden = false;
             emptyAutoReloadHooksReady = false;
             manualReloadAllowedUntil.store(0, std::memory_order_relaxed);
-            nextManualReloadPoll = 0;
-            nextManualReloadStateCheck = 0;
             playerAddress.store(0, std::memory_order_relaxed);
             RestoreHook(holster);
             RestoreHook(cover);

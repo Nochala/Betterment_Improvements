@@ -34,8 +34,6 @@ namespace GameplayFixes
         bool disableArrowTrails = false;
         bool disableReticleSpread = false;
         bool disableReticleSway = false;
-        bool disableWeaponRecoil = false;
-        bool disableFirstPersonWeaponRecoil = false;
         bool disableForcedScope = true;
         bool disableWeaponDegradation = false;
         bool disableHitmarkers = false;
@@ -75,6 +73,7 @@ namespace GameplayFixes
         bool disableDeadEyeFilter = false;
         bool disableWeaponWheelFilter = false;
         bool disableLowHealthFilter = false;
+        bool disableCameraSmoothing = false;
         bool disableHeadBob = false;
         bool reduceCameraShake = false;
         bool reduceCameraSway = false;

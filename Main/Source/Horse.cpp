@@ -3,6 +3,7 @@
 #include "../../Headers/Logger.h"
 #include "main.h"
 #include <windows.h>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,8 @@ namespace
     constexpr std::uint64_t getCurrentPedWeapon = 0x3A87E44BB9A01D54ULL;
     constexpr std::uint64_t setCurrentPedWeapon = 0xADF692B254977C0CULL;
     constexpr std::uint64_t isWeaponTwoHanded = 0x0556E9D2ECF39D01ULL;
+    constexpr std::uint64_t getWeaponFromHorseHolster = 0xAFFD0CCF31F469B8ULL;
+    constexpr std::uint64_t isWeaponHolsterStateChanging = 0x2387D6E9C6B478AAULL;
     constexpr std::uint64_t isControlJustReleased = 0x50F940259D3841E6ULL;
     constexpr std::uint64_t animpostfxIsRunning = 0x4A123E85D7C4CA0BULL;
     constexpr std::uint64_t getHashKey = 0xFD340785ADF8CFB7ULL;
@@ -38,9 +41,8 @@ namespace
     constexpr std::uint64_t getClosestVehicleNode = 0x240A18690AE96513ULL;
     constexpr std::uint64_t getGroundZFor3DCoord = 0x24FA4267BB8D2431ULL;
     constexpr std::uint64_t getWaterHeight = 0xFCA8B23F28813F69ULL;
-    constexpr std::uint64_t isSphereVisible = 0x2E941B5FFA2989C6ULL;
-    constexpr std::uint64_t isEntityOnScreen = 0x613C15D5D8DB781FULL;
     constexpr std::uint64_t setEntityCoordsNoOffset = 0x239A3351AC1DA385ULL;
+    constexpr std::uint64_t getWhistleRangeMaxForBondingLevel = 0x78D8C1D4EB80C588ULL;
     constexpr std::uint64_t taskGoToWhistle = 0xBAD6545608CECA6EULL;
     constexpr std::uint64_t taskFollowToOffsetOfEntity = 0x304AE42E357B8C7EULL;
     constexpr std::uint64_t getEntityForwardVector = 0x2412D9C05BB09B97ULL;
@@ -223,9 +225,192 @@ namespace
         return static_cast<std::uint32_t>(*nativeCall());
     }
 
+    using WeaponSelection = bool(*)(const void*, const void*, const void*, const void*);
+    constexpr std::uintptr_t timedSelectionCallRva = 0x1102D2E;
+    constexpr std::uintptr_t weaponSelectionRva = 0x114C140;
+    constexpr std::uint8_t originalTimedSelectionCall[] = { 0xE8, 0x0D, 0x94, 0x04, 0x00 };
+    std::atomic<std::uintptr_t> mountedPlayerAddress{ 0 };
+    WeaponSelection originalWeaponSelection = nullptr;
+    std::uint8_t* timedSelectionCall = nullptr;
+    std::uint8_t timedSelectionPatch[sizeof(originalTimedSelectionCall)] = {};
+
+    struct WeaponIdentity
+    {
+        std::uint64_t low;
+        std::uint64_t high;
+
+        bool operator==(const WeaponIdentity& other) const
+        {
+            return low == other.low && high == other.high;
+        }
+    };
+
+    constexpr WeaponIdentity unarmedIdentity{ 0x8000000000000000ULL, 0xAA5F3FF571E47700ULL };
+
+    template<typename T>
+    bool ReadGameValue(std::uintptr_t address, T& value)
+    {
+        SIZE_T read = 0;
+        return address && ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address),
+            &value, sizeof(value), &read) && read == sizeof(value);
+    }
+
+    std::uintptr_t WeaponSlotEntry(std::uintptr_t manager, std::uintptr_t slots, int slot)
+    {
+        std::uint8_t index = 0xFF;
+        std::uintptr_t entry = 0;
+        if (ReadGameValue(manager + 0x98 + slot, index) && index != 0xFF)
+            ReadGameValue(slots + index * sizeof(entry), entry);
+        return entry;
+    }
+
+    bool PreserveMountedFists(std::uintptr_t manager, std::uintptr_t requested)
+    {
+        const auto player = mountedPlayerAddress.load(std::memory_order_acquire);
+        std::uintptr_t owner = 0;
+        std::uintptr_t slots = 0;
+        if (!player || !manager || !ReadGameValue(manager + 0x20, owner) || owner != player ||
+            !ReadGameValue(manager + 0x88, slots) || !slots)
+            return false;
+
+        const auto hand = WeaponSlotEntry(manager, slots, horseWeaponPoints[0]);
+        WeaponIdentity current = {}, pending = {}, target = {};
+        std::uintptr_t weapon = 0;
+        if (!hand || !ReadGameValue(hand + 8, current) || !(current == unarmedIdentity) ||
+            !ReadGameValue(hand + 0x28, pending) || !(pending == unarmedIdentity) ||
+            !ReadGameValue(hand + 0x68, weapon) || weapon ||
+            !ReadGameValue(requested, target) || target == unarmedIdentity)
+            return false;
+
+        for (int i = 1; i < 5; ++i)
+        {
+            const auto carry = WeaponSlotEntry(manager, slots, horseWeaponPoints[i]);
+            WeaponIdentity identity = {};
+            if (carry && ReadGameValue(carry + 8, identity) && identity == target)
+                return true;
+        }
+        return false;
+    }
+
+    bool OnTimedWeaponSelection(const void* manager, const void* weapon, const void* options, const void* context)
+    {
+        if (PreserveMountedFists(reinterpret_cast<std::uintptr_t>(manager), reinterpret_cast<std::uintptr_t>(weapon)))
+            return false;
+        return originalWeaponSelection(manager, weapon, options, context);
+    }
+
+    std::uint8_t* AllocateTimedSelectionRelay(std::uintptr_t site)
+    {
+        SYSTEM_INFO system = {};
+        GetNativeSystemInfo(&system);
+        const auto granularity = static_cast<std::uintptr_t>(system.dwAllocationGranularity);
+        if (!granularity)
+            return nullptr;
+
+        const auto origin = site & ~(granularity - 1);
+        for (std::uintptr_t offset = granularity; offset < 0x70000000; offset += granularity)
+        {
+            const std::uintptr_t locations[] = { origin - offset, origin + offset };
+            for (const auto location : locations)
+            {
+                MEMORY_BASIC_INFORMATION region = {};
+                if (VirtualQuery(reinterpret_cast<const void*>(location), &region, sizeof(region)) != sizeof(region) ||
+                    region.State != MEM_FREE)
+                    continue;
+                auto* page = static_cast<std::uint8_t*>(VirtualAlloc(reinterpret_cast<void*>(location),
+                    4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+                if (page)
+                    return page;
+            }
+        }
+        return nullptr;
+    }
+
+    bool ReplaceTimedSelectionCall(std::uint8_t* site, const std::uint8_t* expected, const std::uint8_t* replacement)
+    {
+        DWORD originalProtection = 0;
+        if (!VirtualProtect(site, sizeof(originalTimedSelectionCall) + 1, PAGE_EXECUTE_READWRITE, &originalProtection))
+            return false;
+
+        constexpr std::uint8_t followingOpcode = 0x48;
+        const std::uint8_t expectedWord[] = { expected[2], expected[3], expected[4], followingOpcode };
+        const std::uint8_t replacementWord[] = { replacement[2], replacement[3], replacement[4], followingOpcode };
+        LONG oldWord = 0;
+        LONG newWord = 0;
+        std::memcpy(&oldWord, expectedWord, sizeof(oldWord));
+        std::memcpy(&newWord, replacementWord, sizeof(newWord));
+        const bool owned = site[0] == expected[0] && site[1] == expected[1] &&
+            InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(site + 2), newWord, oldWord) == oldWord;
+        if (owned)
+        {
+            FlushInstructionCache(GetCurrentProcess(), site, sizeof(originalTimedSelectionCall));
+        }
+        DWORD ignored = 0;
+        VirtualProtect(site, sizeof(originalTimedSelectionCall) + 1, originalProtection, &ignored);
+        return owned;
+    }
+
+    bool InstallTimedSelectionHook()
+    {
+        if (timedSelectionCall)
+            return std::memcmp(timedSelectionCall, timedSelectionPatch, sizeof(timedSelectionPatch)) == 0;
+
+        auto* image = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(nullptr));
+        if (!image)
+            return false;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0)
+            return false;
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(image + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE || nt->FileHeader.TimeDateStamp != 0x65EEC92E ||
+            nt->OptionalHeader.SizeOfImage != 0x7397600)
+            return false;
+
+        auto* site = image + timedSelectionCallRva;
+        constexpr std::uint8_t expectedSite[] = {
+            0xE8, 0x0D, 0x94, 0x04, 0x00, 0x48, 0x83, 0xC4, 0x40, 0x5B, 0xC3
+        };
+        constexpr std::uint8_t expectedTarget[] = { 0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x08 };
+        if (std::memcmp(site, expectedSite, sizeof(expectedSite)) != 0 ||
+            std::memcmp(image + weaponSelectionRva, expectedTarget, sizeof(expectedTarget)) != 0)
+            return false;
+
+        auto* relayPage = AllocateTimedSelectionRelay(reinterpret_cast<std::uintptr_t>(site));
+        if (!relayPage)
+            return false;
+        auto* relay = relayPage + 0x40;
+
+        constexpr std::uint8_t indirectJump[] = { 0xFF, 0x25, 0, 0, 0, 0 };
+        const auto target = reinterpret_cast<std::uintptr_t>(&OnTimedWeaponSelection);
+        std::memcpy(relay, indirectJump, sizeof(indirectJump));
+        std::memcpy(relay + sizeof(indirectJump), &target, sizeof(target));
+        DWORD ignored = 0;
+        if (!VirtualProtect(relay, sizeof(indirectJump) + sizeof(target), PAGE_EXECUTE_READ, &ignored))
+        {
+            VirtualFree(relayPage, 0, MEM_RELEASE);
+            return false;
+        }
+        FlushInstructionCache(GetCurrentProcess(), relay, sizeof(indirectJump) + sizeof(target));
+
+        originalWeaponSelection = reinterpret_cast<WeaponSelection>(image + weaponSelectionRva);
+        const auto displacement = static_cast<std::int32_t>(reinterpret_cast<std::intptr_t>(relay) -
+            reinterpret_cast<std::intptr_t>(site + sizeof(originalTimedSelectionCall)));
+        timedSelectionPatch[0] = 0xE8;
+        std::memcpy(timedSelectionPatch + 1, &displacement, sizeof(displacement));
+        if (timedSelectionPatch[1] != originalTimedSelectionCall[1] ||
+            !ReplaceTimedSelectionCall(site, originalTimedSelectionCall, timedSelectionPatch))
+        {
+            VirtualFree(relayPage, 0, MEM_RELEASE);
+            return false;
+        }
+        timedSelectionCall = site;
+        return true;
+    }
+
+
     void UpdateWeaponTracking(std::uint64_t ped, ULONGLONG now, bool onMount)
     {
-        if (now >= nextWeaponInputCheck)
+        if (onMount || now >= nextWeaponInputCheck)
         {
             nextWeaponInputCheck = now + horseWeaponInputMs;
             if (Pressed(wheelControl) || JustReleased(wheelControl) ||
@@ -291,10 +476,15 @@ namespace
         {
             if (Logger::IsDebugEnabled() && current[i] != lastReportedWeapons[i])
             {
-                char message[192] = {};
-                std::snprintf(message, sizeof(message), "Horse: weapon slot changed slot=%d previous=%08X current=%08X hand=%08X manualGrace=%s",
+                const std::uint32_t mount = onMount ? InvokeInt(getMount, ped) : 0;
+                const std::uint32_t saddleWeapon = mount ? InvokeInt(getWeaponFromHorseHolster, mount) : 0;
+                const bool holsterChanging = InvokeInt(isWeaponHolsterStateChanging, ped) != 0;
+                char message[320] = {};
+                std::snprintf(message, sizeof(message),
+                    "Horse: weapon slot changed slot=%d previous=%08X current=%08X hand=%08X manualGrace=%s onMount=%s trackingMs=%llu saddleFirst=%08X holsterChanging=%s",
                     horseWeaponPoints[i], lastReportedWeapons[i], current[i], current[0],
-                    now < manualHolsterGraceUntil ? "true" : "false");
+                    now < manualHolsterGraceUntil ? "true" : "false", onMount ? "true" : "false",
+                    static_cast<unsigned long long>(now - mountedSince), saddleWeapon, holsterChanging ? "true" : "false");
                 Logger::Debug(message);
                 lastReportedWeapons[i] = current[i];
             }
@@ -452,7 +642,6 @@ namespace
 
     struct RecallDiagnostics
     {
-        unsigned int offscreen = 0;
         unsigned int safeCoords = 0;
         unsigned int roadNodes = 0;
         unsigned int groundCoords = 0;
@@ -460,7 +649,7 @@ namespace
     };
 
     bool RecallPositionValid(const Position& player, const Position& candidate,
-        float x, float y, RecallDiagnostics& diagnostics)
+        float x, float y, float maxDistance, RecallDiagnostics& diagnostics)
     {
         if (!std::isfinite(candidate.x) || !std::isfinite(candidate.y) || !std::isfinite(candidate.z) ||
             std::fabs(candidate.z - player.z) > 23.0f)
@@ -475,8 +664,9 @@ namespace
             ++diagnostics.rejected;
             return false;
         }
-        const float distanceSq = DistanceSquared(player, candidate);
-        if (distanceSq < 44.0f * 44.0f || distanceSq > 128.0f * 128.0f)
+        const Position landing = { candidate.x, candidate.y, candidate.z + 0.35f };
+        const float distanceSq = DistanceSquared(player, landing);
+        if (distanceSq < 22.0f * 22.0f || distanceSq > maxDistance * maxDistance)
         {
             ++diagnostics.rejected;
             return false;
@@ -493,111 +683,131 @@ namespace
             ++diagnostics.rejected;
             return false;
         }
-        nativeInit(isSphereVisible);
-        nativePush64(FloatArg(candidate.x));
-        nativePush64(FloatArg(candidate.y));
-        nativePush64(FloatArg(candidate.z + 1.6f));
-        nativePush64(FloatArg(7.0f));
-        if (static_cast<std::uint32_t>(*nativeCall()) != 0)
-            return false;
         return true;
     }
 
-    bool FindSafeRecallPosition(const Position& player, const Position& horse,
+    bool FindRecallPoint(const Position& player, float x, float y, float maxDistance,
         Position& destination, RecallDiagnostics& diagnostics, const char*& method)
     {
-        const float dx = horse.x - player.x;
-        const float dy = horse.y - player.y;
-        const float distance = std::sqrt(dx * dx + dy * dy);
-        if (distance < 1.0f)
-            return false;
-        const float directionX = dx / distance;
-        const float directionY = dy / distance;
-        constexpr float directions[][2] = {
-            { 1.0f, 0.0f }, { 0.966f, 0.259f }, { 0.966f, -0.259f },
-            { 0.866f, 0.5f }, { 0.866f, -0.5f },
-            { 0.707f, 0.707f }, { 0.707f, -0.707f },
-            { 0.5f, 0.866f }, { 0.5f, -0.866f },
-            { 0.259f, 0.966f }, { 0.259f, -0.966f },
-            { 0.0f, 1.0f }, { 0.0f, -1.0f },
-            { -0.5f, 0.866f }, { -0.5f, -0.866f }, { -1.0f, 0.0f }
-        };
-        constexpr float radii[] = { 70.0f, 90.0f, 55.0f, 110.0f };
-        for (const float radius : radii)
+        Position safe = {};
+        for (int onGround = 1; onGround >= 0; --onGround)
         {
-            for (const auto& direction : directions)
+            nativeInit(getSafeCoordForPed);
+            nativePush64(FloatArg(x));
+            nativePush64(FloatArg(y));
+            nativePush64(FloatArg(player.z + 3.0f));
+            nativePush64(static_cast<std::uint64_t>(onGround));
+            nativePush64(reinterpret_cast<std::uint64_t>(&safe));
+            nativePush64(0);
+            if (static_cast<std::uint32_t>(*nativeCall()) != 0)
             {
-                const float x = player.x + radius * (directionX * direction[0] - directionY * direction[1]);
-                const float y = player.y + radius * (directionY * direction[0] + directionX * direction[1]);
-                nativeInit(isSphereVisible);
-                nativePush64(FloatArg(x));
-                nativePush64(FloatArg(y));
-                nativePush64(FloatArg(player.z + 1.6f));
-                nativePush64(FloatArg(7.0f));
-                if (static_cast<std::uint32_t>(*nativeCall()) != 0)
-                    continue;
-                ++diagnostics.offscreen;
-                Position safe = {};
-                for (int onGround = 1; onGround >= 0; --onGround)
+                ++diagnostics.safeCoords;
+                if (RecallPositionValid(player, safe, x, y, maxDistance, diagnostics))
                 {
-                    nativeInit(getSafeCoordForPed);
-                    nativePush64(FloatArg(x));
-                    nativePush64(FloatArg(y));
-                    nativePush64(FloatArg(player.z + 3.0f));
-                    nativePush64(static_cast<std::uint64_t>(onGround));
-                    nativePush64(reinterpret_cast<std::uint64_t>(&safe));
-                    nativePush64(0);
-                    if (static_cast<std::uint32_t>(*nativeCall()) != 0)
-                    {
-                        ++diagnostics.safeCoords;
-                        if (RecallPositionValid(player, safe, x, y, diagnostics))
-                        {
-                            destination = safe;
-                            method = "ped-navmesh";
-                            return true;
-                        }
-                    }
-                }
-                safe = {};
-                nativeInit(getClosestVehicleNode);
-                nativePush64(FloatArg(x));
-                nativePush64(FloatArg(y));
-                nativePush64(FloatArg(player.z + 3.0f));
-                nativePush64(reinterpret_cast<std::uint64_t>(&safe));
-                nativePush64(1);
-                nativePush64(FloatArg(3.0f));
-                nativePush64(FloatArg(0.0f));
-                if (static_cast<std::uint32_t>(*nativeCall()) != 0)
-                {
-                    ++diagnostics.roadNodes;
-                    if (RecallPositionValid(player, safe, x, y, diagnostics))
-                    {
-                        destination = safe;
-                        method = "road-node";
-                        return true;
-                    }
-                }
-                float groundZ = 0.0f;
-                nativeInit(getGroundZFor3DCoord);
-                nativePush64(FloatArg(x));
-                nativePush64(FloatArg(y));
-                nativePush64(FloatArg(player.z + 35.0f));
-                nativePush64(reinterpret_cast<std::uint64_t>(&groundZ));
-                nativePush64(0);
-                if (static_cast<std::uint32_t>(*nativeCall()) != 0)
-                {
-                    ++diagnostics.groundCoords;
-                    safe = { x, y, groundZ };
-                    if (RecallPositionValid(player, safe, x, y, diagnostics))
-                    {
-                        destination = safe;
-                        method = "terrain-ground";
-                        return true;
-                    }
+                    destination = safe;
+                    method = "ped-navmesh";
+                    return true;
                 }
             }
         }
+        safe = {};
+        nativeInit(getClosestVehicleNode);
+        nativePush64(FloatArg(x));
+        nativePush64(FloatArg(y));
+        nativePush64(FloatArg(player.z + 3.0f));
+        nativePush64(reinterpret_cast<std::uint64_t>(&safe));
+        nativePush64(1);
+        nativePush64(FloatArg(3.0f));
+        nativePush64(FloatArg(0.0f));
+        if (static_cast<std::uint32_t>(*nativeCall()) != 0)
+        {
+            ++diagnostics.roadNodes;
+            if (RecallPositionValid(player, safe, x, y, maxDistance, diagnostics))
+            {
+                destination = safe;
+                method = "road-node";
+                return true;
+            }
+        }
+        float groundZ = 0.0f;
+        nativeInit(getGroundZFor3DCoord);
+        nativePush64(FloatArg(x));
+        nativePush64(FloatArg(y));
+        nativePush64(FloatArg(player.z + 35.0f));
+        nativePush64(reinterpret_cast<std::uint64_t>(&groundZ));
+        nativePush64(0);
+        if (static_cast<std::uint32_t>(*nativeCall()) != 0)
+        {
+            ++diagnostics.groundCoords;
+            safe = { x, y, groundZ };
+            if (RecallPositionValid(player, safe, x, y, maxDistance, diagnostics))
+            {
+                destination = safe;
+                method = "terrain-ground";
+                return true;
+            }
+        }
         return false;
+    }
+
+    bool FindRecallPosition(const Position& player, const Position& horse,
+        Position& destination, RecallDiagnostics& diagnostics, const char*& method)
+    {
+        nativeInit(getWhistleRangeMaxForBondingLevel);
+        nativePush64(4);
+        const auto* result = nativeCall();
+        float whistleRange = 0.0f;
+        if (result)
+            std::memcpy(&whistleRange, result, sizeof(whistleRange));
+        if (!std::isfinite(whistleRange) || whistleRange < 100.0f || whistleRange > 1000.0f)
+            whistleRange = 350.0f;
+
+        const float horseDistance = std::sqrt(DistanceSquared(player, horse));
+        const float maxDistance = std::fmin(whistleRange, horseDistance) - 5.0f;
+        const float heading = std::atan2(horse.y - player.y, horse.x - player.x);
+        constexpr float angleOffsets[] = { 0.0f, 0.393f, -0.393f, 0.785f, -0.785f,
+            1.571f, -1.571f, 2.356f, -2.356f, 3.142f };
+        constexpr float radiusScales[] = { 0.99f, 0.85f, 0.65f, 0.45f, 0.25f };
+        for (const float offset : angleOffsets)
+        {
+            const float directionX = std::cos(heading + offset);
+            const float directionY = std::sin(heading + offset);
+            for (const float scale : radiusScales)
+            {
+                const float radius = maxDistance * scale;
+                const float x = player.x + radius * directionX;
+                const float y = player.y + radius * directionY;
+                if (FindRecallPoint(player, x, y, maxDistance, destination, diagnostics, method))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    void RelocateRecallHorse(std::uint32_t horse, const Position& player, const Position& destination,
+        const char* method)
+    {
+        nativeInit(setEntityCoordsNoOffset);
+        nativePush64(horse);
+        nativePush64(FloatArg(destination.x));
+        nativePush64(FloatArg(destination.y));
+        nativePush64(FloatArg(destination.z + 0.35f));
+        nativePush64(0);
+        nativePush64(0);
+        nativePush64(1);
+        nativeCall();
+        if (Logger::IsDebugEnabled())
+        {
+            Position moved = {};
+            const bool confirmed = ReadPosition(horse, moved) &&
+                DistanceSquared(moved, destination) < 8.0f * 8.0f;
+            char message[256] = {};
+            std::snprintf(message, sizeof(message),
+                "DisableHorseWhistleDistance: relocation via %s at %.1f meters (verified=%s).",
+                method,
+                std::sqrt(DistanceSquared(player, destination)), confirmed ? "true" : "false");
+            Logger::Debug(message);
+        }
     }
 
     void RestoreHorseBlip()
@@ -799,7 +1009,7 @@ namespace
                     helpSuppressionUntil = now + horseWhistleHelpWindowMs;
                     nextHelpPoll = now + 50;
                 }
-                if (now >= nextWhistleAt)
+                if (!pendingWhistle && now >= nextWhistleAt)
                 {
                     nextWhistleAt = now + horseWhistleCooldownMs;
                     pendingWhistle = true;
@@ -823,46 +1033,19 @@ namespace
                     const float distanceSq = DistanceSquared(playerPos, horsePos);
                     if (distanceSq > 140.0f * 140.0f)
                     {
-                        if (!InvokeInt(isEntityOnScreen, horse))
-                        {
-                            Position safe = {};
-                            RecallDiagnostics diagnostics = {};
-                            const char* method = "";
-                            if (FindSafeRecallPosition(playerPos, horsePos, safe, diagnostics, method))
-                            {
-                                nativeInit(setEntityCoordsNoOffset);
-                                nativePush64(horse);
-                                nativePush64(FloatArg(safe.x));
-                                nativePush64(FloatArg(safe.y));
-                                nativePush64(FloatArg(safe.z + 0.35f));
-                                nativePush64(0);
-                                nativePush64(0);
-                                nativePush64(1);
-                                nativeCall();
-                                if (Logger::IsDebugEnabled())
-                                {
-                                    Position moved = {};
-                                    const bool confirmed = ReadPosition(horse, moved) &&
-                                        DistanceSquared(moved, safe) < 8.0f * 8.0f;
-                                    char message[256] = {};
-                                    std::snprintf(message, sizeof(message),
-                                        "DisableHorseWhistleDistance: off-screen relocation via %s at %.1f meters (verified=%s).",
-                                        method, std::sqrt(DistanceSquared(playerPos, safe)), confirmed ? "true" : "false");
-                                    Logger::Debug(message);
-                                }
-                            }
-                            else if (Logger::IsDebugEnabled())
-                            {
-                                char message[256] = {};
-                                std::snprintf(message, sizeof(message),
-                                    "DisableHorseWhistleDistance: no valid recall point (offscreen=%u, navmesh=%u, roads=%u, ground=%u, rejected=%u).",
-                                    diagnostics.offscreen, diagnostics.safeCoords, diagnostics.roadNodes,
-                                    diagnostics.groundCoords, diagnostics.rejected);
-                                Logger::Debug(message);
-                            }
-                        }
+                        Position safe = {};
+                        RecallDiagnostics diagnostics = {};
+                        const char* method = "";
+                        if (FindRecallPosition(playerPos, horsePos, safe, diagnostics, method))
+                            RelocateRecallHorse(horse, playerPos, safe, method);
                         else if (Logger::IsDebugEnabled())
-                            Logger::Debug("DisableHorseWhistleDistance: horse is currently on-screen; relocation skipped.");
+                        {
+                            char message[256] = {};
+                            std::snprintf(message, sizeof(message),
+                                "DisableHorseWhistleDistance: no valid recall point (navmesh=%u, roads=%u, ground=%u, rejected=%u).",
+                                diagnostics.safeCoords, diagnostics.roadNodes, diagnostics.groundCoords, diagnostics.rejected);
+                            Logger::Debug(message);
+                        }
                         RequestWhistle(horse, player);
                         if (Logger::IsDebugEnabled())
                             Logger::Debug("DisableHorseWhistleDistance: issued native whistle task.");
@@ -936,6 +1119,7 @@ namespace Main::Horse
     {
         ResetWeaponTracking();
         disableAutoEquip = noAutoHorseEquip;
+        mountedPlayerAddress.store(0, std::memory_order_release);
         disableAutoHolster = noAutoHorseHolster;
         if (!disableAutoEquip && !disableAutoHolster)
             recentDismountUntil = 0;
@@ -970,8 +1154,13 @@ namespace Main::Horse
         }
         if (disableAutoEquip || disableAutoHolster)
             Logger::Log("[INFO] Horse: weapon settings loaded.");
-        if (disableAutoHolster && Logger::IsDebugEnabled())
-            Logger::Debug("Horse: continuous horse holster prevention enabled.");
+        if (disableAutoHolster)
+        {
+            if (InstallTimedSelectionHook())
+                Logger::Log("[SUCCESS] Horse: timed stow hook enabled.");
+            else
+                Logger::Log("[WARN] Horse: timed stow hook unavailable for this executable.");
+        }
         if (disableAutoJump)
             Logger::Log("[INFO] DisableHorseAutoJump: enabled.");
         if (disableWhistleDistance)
@@ -990,6 +1179,7 @@ namespace Main::Horse
         if (ped == 0 || (ped != lastPlayerPed && !InvokeInt(doesEntityExist, ped)))
         {
             ResetWeaponTracking();
+            mountedPlayerAddress.store(0, std::memory_order_release);
             lastPlayerPed = 0;
             mounted = false;
             recentDismountUntil = 0;
@@ -1016,6 +1206,9 @@ namespace Main::Horse
         nativeInit(isPedOnMount);
         nativePush64(ped);
         const bool onMount = static_cast<std::uint32_t>(*nativeCall()) != 0;
+        const auto playerAddress = disableAutoHolster && onMount && timedSelectionCall ?
+            reinterpret_cast<std::uintptr_t>(getScriptHandleBaseAddress(static_cast<int>(ped))) : 0;
+        mountedPlayerAddress.store(playerAddress, std::memory_order_release);
         const ULONGLONG now = GetTickCount64();
         const bool mountChanged = mounted != onMount;
         if (disableWhistleDistance || fixFollowBehavior)
@@ -1088,6 +1281,13 @@ namespace Main::Horse
         if (mountChanged && Logger::IsDebugEnabled())
             LogState(onMount ? "mounted" : "dismounted", ped, onMount);
         mounted = onMount;
+    }
+
+    void Shutdown()
+    {
+        mountedPlayerAddress.store(0, std::memory_order_release);
+        if (timedSelectionCall)
+            ReplaceTimedSelectionCall(timedSelectionCall, timedSelectionPatch, originalTimedSelectionCall);
     }
 
     bool NeedsAutoJumpFrameUpdate()

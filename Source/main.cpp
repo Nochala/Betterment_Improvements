@@ -10,6 +10,7 @@
 #include "../Main/Headers/Camera.h"
 #include "../Main/Headers/Modules.h"
 #include "../Main/Headers/Gunz.h"
+#include "../Main/Headers/Horse.h"
 #include "../Main/Headers/ConfigMenu.h"
 
 namespace
@@ -45,6 +46,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         keyboardHandlerUnregister(Main::ConfigMenu::OnKeyboard);
         Main::ConfigMenu::Shutdown();
         Main::Gunz::Shutdown();
+        Main::Horse::Shutdown();
         Main::Camera::Shutdown();
         Main::CrashFixes::ShutdownCrashDiagnostics();
         Main::CrashFixes::ShutdownPackfileLimits();

@@ -1237,6 +1237,21 @@ namespace
             char line[128] = {};
             std::snprintf(line, sizeof(line), "[PROCESS_EXIT] TerminateProcess code=%u\r\n", code);
             WriteGFXTrace(line);
+            void* frames[16] = {};
+            const USHORT frameCount = CaptureStackBackTrace(1, 16, frames, nullptr);
+            std::snprintf(line, sizeof(line), "[TERMINATE_STACK] thread=%lu frames=%u\r\n",
+                GetCurrentThreadId(), static_cast<unsigned int>(frameCount));
+            WriteGFXTrace(line);
+            for (USHORT i = 0; i < frameCount; ++i)
+            {
+                char location[128] = {};
+                DescribeCrashLocation(frames[i], location);
+                char frameLine[256] = {};
+                std::snprintf(frameLine, sizeof(frameLine),
+                    "[TERMINATE_FRAME] index=%u address=%p location=%s\r\n",
+                    static_cast<unsigned int>(i), frames[i], location);
+                WriteGFXTrace(frameLine);
+            }
             GFXCaptureFatal("TerminateProcess");
         }
         const auto original = gfxOriginalTerminateProcess.load();

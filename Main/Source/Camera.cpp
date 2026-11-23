@@ -3,16 +3,185 @@
 #include "main.h"
 #include <windows.h>
 #include <shlobj.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <iterator>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "shell32.lib")
 
 namespace
 {
+    constexpr std::uintptr_t smoothingCameraVtableRva = 0x337EA90;
+    constexpr std::uint32_t smoothingModifierHash = 0x1385680D;
+    constexpr std::size_t smoothingScanBytes = 8 * 1024 * 1024;
+
+    struct CameraModifierList
+    {
+        std::uint32_t* entries;
+        std::uint16_t count;
+        std::uint16_t capacity;
+    };
+
+    bool smoothingDisabled = false;
+    std::uintptr_t smoothingScanCursor = 0;
+    std::vector<std::uintptr_t> smoothingScanBuffer;
+    struct CameraSmoothingTarget
+    {
+        std::uint32_t cameraHash;
+        std::uint32_t modifierSequence[5];
+        CameraModifierList* list = nullptr;
+        CameraModifierList original{};
+        std::vector<std::uint32_t> entries;
+    };
+
+    CameraSmoothingTarget smoothingTargets[] = {
+        { 0xFBE36564, { 0xD9A293BF, 0x52264339, smoothingModifierHash, 0x1DFC2FC7, 0xC9B22720 } },
+        { 0xB611DAF3, { 0xA93D4712, 0x52264339, smoothingModifierHash, 0x85B59D8B, 0x19149792 } }
+    };
+
+    bool HasCameraSmoothingWork()
+    {
+        return smoothingDisabled && smoothingScanCursor != UINTPTR_MAX &&
+            std::any_of(std::begin(smoothingTargets), std::end(smoothingTargets),
+                [](const CameraSmoothingTarget& target) { return target.list == nullptr; });
+    }
+
+    bool ReadCameraMemory(const void* address, void* output, std::size_t size)
+    {
+        SIZE_T read = 0;
+        return ReadProcessMemory(GetCurrentProcess(), address, output, size, &read) && read == size;
+    }
+
+    bool WriteCameraMemory(void* address, const void* input, std::size_t size)
+    {
+        SIZE_T written = 0;
+        return WriteProcessMemory(GetCurrentProcess(), address, input, size, &written) && written == size;
+    }
+
+    bool SetCameraSmoothingList(std::uintptr_t camera, CameraSmoothingTarget& target)
+    {
+        auto* list = reinterpret_cast<CameraModifierList*>(camera + 0x30);
+        CameraModifierList original{};
+        if (!ReadCameraMemory(list, &original, sizeof(original)) || !original.entries ||
+            original.count < std::size(target.modifierSequence) || original.count > original.capacity ||
+            original.capacity > 256)
+            return false;
+
+        std::vector<std::uint32_t> entries(original.count);
+        if (!ReadCameraMemory(original.entries, entries.data(), entries.size() * sizeof(entries[0])))
+            return false;
+
+        const auto modifier = std::search(entries.begin(), entries.end(),
+            std::begin(target.modifierSequence), std::end(target.modifierSequence));
+        if (modifier == entries.end() || std::count(entries.begin(), entries.end(), smoothingModifierHash) != 1)
+            return false;
+
+        auto filtered = entries;
+        filtered.erase(filtered.begin() + (modifier - entries.begin()) + 2);
+        const auto count = static_cast<std::uint16_t>(filtered.size());
+        if (!WriteCameraMemory(&list->count, &count, sizeof(count)))
+            return false;
+        if (!WriteCameraMemory(original.entries, filtered.data(), filtered.size() * sizeof(filtered[0])))
+        {
+            if (WriteCameraMemory(original.entries, entries.data(), entries.size() * sizeof(entries[0])))
+                WriteCameraMemory(&list->count, &original.count, sizeof(original.count));
+            return false;
+        }
+
+        target.list = list;
+        target.original = original;
+        target.entries = std::move(entries);
+        Logger::Log("[INFO] DisableCameraSmoothing: third-person camera modifier removed.");
+        return true;
+    }
+
+    void RestoreCameraSmoothing(CameraSmoothingTarget& target)
+    {
+        if (!target.list)
+            return;
+
+        CameraModifierList current{};
+        std::vector<std::uint32_t> filtered(target.original.count - 1);
+        auto expected = target.entries;
+        expected.erase(std::find(expected.begin(), expected.end(), smoothingModifierHash));
+        if (ReadCameraMemory(target.list, &current, sizeof(current)) &&
+            current.entries == target.original.entries && current.capacity == target.original.capacity &&
+            current.count == filtered.size() &&
+            ReadCameraMemory(current.entries, filtered.data(), filtered.size() * sizeof(filtered[0])) &&
+            filtered == expected &&
+            WriteCameraMemory(current.entries, target.entries.data(), target.entries.size() * sizeof(target.entries[0])) &&
+            WriteCameraMemory(&target.list->count, &target.original.count, sizeof(target.original.count)))
+        {
+            Logger::Log("[INFO] DisableCameraSmoothing: third-person camera modifier restored.");
+        }
+
+        target.list = nullptr;
+        target.original = {};
+        target.entries.clear();
+    }
+
+    void RestoreCameraSmoothing()
+    {
+        for (auto& target : smoothingTargets)
+            RestoreCameraSmoothing(target);
+    }
+
+    void UpdateCameraSmoothing()
+    {
+        if (!HasCameraSmoothingWork())
+            return;
+
+        const auto image = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+        const auto vtable = image + smoothingCameraVtableRva;
+        if (smoothingScanBuffer.empty())
+            smoothingScanBuffer.resize(smoothingScanBytes / sizeof(std::uintptr_t) + 1);
+
+        MEMORY_BASIC_INFORMATION region{};
+        while (VirtualQuery(reinterpret_cast<const void*>(smoothingScanCursor), &region, sizeof(region)) == sizeof(region))
+        {
+            const auto end = reinterpret_cast<std::uintptr_t>(region.BaseAddress) + region.RegionSize;
+            const auto cursor = smoothingScanCursor;
+            smoothingScanCursor = end;
+            if (region.State != MEM_COMMIT || region.Type != MEM_PRIVATE || region.Protect != PAGE_READWRITE)
+                continue;
+
+            const auto size = (std::min)(end - cursor, smoothingScanBytes + sizeof(std::uintptr_t));
+            smoothingScanCursor = cursor + (std::min)(end - cursor, smoothingScanBytes);
+            if (ReadCameraMemory(reinterpret_cast<const void*>(cursor), smoothingScanBuffer.data(), size))
+            {
+                const auto words = size / sizeof(std::uintptr_t);
+                for (std::size_t index = 0; index + 1 < words; ++index)
+                {
+                    if (smoothingScanBuffer[index] != vtable)
+                        continue;
+
+                    const auto hash = static_cast<std::uint32_t>(smoothingScanBuffer[index + 1]);
+                    for (auto& target : smoothingTargets)
+                    {
+                        if (!target.list && target.cameraHash == hash)
+                            SetCameraSmoothingList(cursor + index * sizeof(std::uintptr_t), target);
+                    }
+
+                    if (!HasCameraSmoothingWork())
+                    {
+                        std::vector<std::uintptr_t>().swap(smoothingScanBuffer);
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        smoothingScanCursor = UINTPTR_MAX;
+        std::vector<std::uintptr_t>().swap(smoothingScanBuffer);
+        Logger::Log("[WARNING] DisableCameraSmoothing: one or more matching camera records were unavailable.");
+    }
+
     constexpr std::uint64_t animpostfxIsRunning = 0x4A123E85D7C4CA0BULL;
     constexpr std::uint64_t animpostfxSetStrength = 0xCAB4DD2D5B2B7246ULL;
     constexpr const char* drunkFilters[] = {
@@ -31,11 +200,9 @@ namespace
     };
     constexpr std::uint64_t isPlayerControlOn = 0x7964097FCE4C244BULL;
     constexpr std::uint64_t isGameplayCamRendering = 0x8660EA714834E412ULL;
-    constexpr std::uint64_t isFirstPersonAimCamActive = 0xF63134C54B6EC212ULL;
-    constexpr std::uint64_t isInFullFirstPersonMode = 0xD1BA66940E94C547ULL;
+    constexpr std::uint64_t isLoadingScreenActive = 0x71D4BF5890659B0CULL;
+    constexpr std::uint64_t isScreenFadedIn = 0x37F9A426FBCF4AF2ULL;
     constexpr std::uint64_t playerPedId = 0x096275889B8E0EE0ULL;
-    constexpr std::uint64_t isPedShooting = 0x34616828CD07F1A1ULL;
-    constexpr std::uint64_t isPedArmed = 0xCB690F680A3EA971ULL;
     constexpr std::uint64_t isPedOnFoot = 0x01FEE67DB37F59B2ULL;
     constexpr std::uint64_t isPedOnMount = 0x460BC76A0E10655EULL;
     constexpr std::uint64_t getMount = 0xE7E11B8DCBED1058ULL;
@@ -43,35 +210,16 @@ namespace
     constexpr std::uint64_t setGameplayCamShakeAmplitude = 0x570E35F5C4A44838ULL;
     constexpr std::uint64_t isGameplayCamShaking = 0xEA4C5F4AA0A4DBEFULL;
     constexpr std::uint64_t stopGameplayCamShaking = 0xE0DE43D290FB65F9ULL;
-    constexpr std::uint64_t isGameplayCamShakingWithName = 0x0060B31968E60E41ULL;
-    constexpr std::uint64_t stopGameplayCamShakingWithName = 0x4285804FD65D8066ULL;
     constexpr std::uint64_t isInCinematicMode = 0x74F1D22EFA71FAB8ULL;
     constexpr std::uint64_t isCinematicCamRendering = 0xBF7C780731AADBF8ULL;
     constexpr std::uint64_t isControlPressed = 0xF3A21BCD95725A4AULL;
     constexpr std::uint64_t disableAllControlActions = 0x5F4B6931816E599BULL;
     constexpr std::uint64_t disableCinematicModeThisFrame = 0x8910C24B7E0046ECULL;
     constexpr std::uint64_t invalidateCinematicVehicleIdleMode = 0x634F4A0562CF19B8ULL;
-    constexpr std::uint32_t aimControl = 0xF84FA74F;
-    constexpr std::uint32_t horseAimControl = 0x61470051;
     constexpr std::uint32_t cinematicCameraControl = 0x620A6C5E;
     constexpr std::uint32_t cinematicCameraHoldControl = 0xD7E7B375;
     constexpr ULONGLONG vehicleRefreshMs = 1000;
     constexpr ULONGLONG manualCameraAllowanceMs = 3000;
-    constexpr ULONGLONG recoilReleaseMs = 350;
-    constexpr ULONGLONG firstPersonRecoilReleaseMs = 350;
-    constexpr const char* firstPersonRecoilShakes[] = {
-        "DEFAULT_FIRST_PERSON_RECOIL_SHAKE",
-        "FPS_PISTOL_RECOIL_SHAKE",
-        "FPS_SHOTGUN_RECOIL_SHAKE",
-        "FPS_ASSAULT_RIFLE_RECOIL_SHAKE"
-    };
-    constexpr const char* thirdPersonRecoilShakes[] = {
-        "default_third_person_recoil_shake",
-        "PISTOL_RECOIL_SHAKE",
-        "SHOTGUN_RECOIL_SHAKE",
-        "ASSAULT_RIFLE_RECOIL_SHAKE",
-        "MG_RECOIL_SHAKE"
-    };
 
     bool enabled = false;
     bool drunkFilterDisabled = false;
@@ -89,14 +237,6 @@ namespace
     bool headBobStatusReported = false;
     bool shakeReductionEnabled = false;
     bool swayReductionEnabled = false;
-    bool recoilReductionEnabled = false;
-    bool firstPersonRecoilReductionEnabled = false;
-    bool recoilReductionApplied = false;
-    bool firstPersonRecoilStatusReported = false;
-    bool thirdPersonRecoilStatusReported = false;
-    bool firstPersonNamedShakeDetected = false;
-    bool thirdPersonNamedShakeDetected = false;
-    ULONGLONG recoilReleaseUntil = 0;
     bool shakeReductionApplied = false;
     bool swayStopped = false;
     bool swayStatusReported = false;
@@ -107,6 +247,7 @@ namespace
     bool backgroundIdleStatusReported = false;
     std::atomic<bool> fullscreenTabOutEnabled{ false };
     std::atomic<bool> minimizeOnTabOutEnabled{ false };
+    std::atomic<bool> windowFocusReady{ false };
     bool minimizeGameFocused = false;
     HWND minimizeGameWindow = nullptr;
     HANDLE focusMonitorStop = nullptr;
@@ -266,7 +407,7 @@ namespace
                 fullscreenRestorePending = false;
         }
 
-        if (fullscreenRestorePending && fullscreenFocusReturnedAt != 0 &&
+        if (windowFocusReady && fullscreenRestorePending && fullscreenFocusReturnedAt != 0 &&
             now - fullscreenFocusReturnedAt >= 1200 && !IsIconic(window) &&
             (GetAsyncKeyState(VK_MENU) & 0x8000) == 0 &&
             (GetAsyncKeyState(VK_TAB) & 0x8000) == 0 &&
@@ -341,7 +482,7 @@ namespace
             return;
 
         minimizeGameFocused = false;
-        if (minimizeGameWindow && IsWindow(minimizeGameWindow) && !IsIconic(minimizeGameWindow))
+        if (windowFocusReady && minimizeGameWindow && IsWindow(minimizeGameWindow) && !IsIconic(minimizeGameWindow))
         {
             if (ShowWindowAsync(minimizeGameWindow, SW_MINIMIZE))
             {
@@ -351,6 +492,28 @@ namespace
             else
                 Logger::Log("[WARNING] MinimizeOnTabOut: unable to request window minimization.");
         }
+    }
+
+    void ResetWindowFocusTracking()
+    {
+        fullscreenFocusInitialized = false;
+        fullscreenGameFocused = false;
+        fullscreenRestorePending = false;
+        fullscreenFocusReturnedAt = 0;
+        fullscreenFocusLostAt = 0;
+        minimizeGameFocused = false;
+        minimizeGameWindow = nullptr;
+    }
+
+    void UpdateWindowFocus()
+    {
+        if (!windowFocusReady)
+        {
+            ResetWindowFocusTracking();
+            return;
+        }
+        FixFullscreenTabOut();
+        MinimizeOnTabOut();
     }
 
     void ResetFullscreenTabOut()
@@ -405,10 +568,7 @@ namespace
                 if (minimize)
                     Logger::Log("[INFO] MinimizeOnTabOut: enabled.");
             }
-            if (fullscreen)
-                FixFullscreenTabOut();
-            if (minimize)
-                MinimizeOnTabOut();
+            UpdateWindowFocus();
         } while (WaitForSingleObject(stop, 50) == WAIT_TIMEOUT);
         CloseHandle(stop);
         return 0;
@@ -418,6 +578,18 @@ namespace
     {
         nativeInit(hash);
         return *nativeCall() != 0;
+    }
+
+    void UpdateWindowFocusReadiness()
+    {
+        if ((!fullscreenTabOutEnabled && !minimizeOnTabOutEnabled) ||
+            InvokeBoolean(isLoadingScreenActive) || !InvokeBoolean(playerPedId))
+        {
+            windowFocusReady = false;
+            return;
+        }
+        if (!windowFocusReady && InvokeBoolean(isScreenFadedIn))
+            windowFocusReady = true;
     }
 
     bool SuppressPostFx(const char* effect, bool observe)
@@ -446,21 +618,6 @@ namespace
     {
         nativeInit(hash);
         nativeCall();
-    }
-
-    bool PedShooting(std::uint64_t ped)
-    {
-        nativeInit(isPedShooting);
-        nativePush64(ped);
-        return *nativeCall() != 0;
-    }
-
-    bool PedArmed(std::uint64_t ped)
-    {
-        nativeInit(isPedArmed);
-        nativePush64(ped);
-        nativePush64(4);
-        return *nativeCall() != 0;
     }
 
     bool PedMovingOnFootOrMount(std::uint64_t ped)
@@ -496,35 +653,6 @@ namespace
         return speed > 0.35f;
     }
 
-    void SuppressRecoilShakes(bool firstPerson)
-    {
-        const char* const* names = firstPerson ? firstPersonRecoilShakes : thirdPersonRecoilShakes;
-        const unsigned int count = firstPerson ?
-            sizeof(firstPersonRecoilShakes) / sizeof(firstPersonRecoilShakes[0]) :
-            sizeof(thirdPersonRecoilShakes) / sizeof(thirdPersonRecoilShakes[0]);
-        bool& detected = firstPerson ? firstPersonNamedShakeDetected : thirdPersonNamedShakeDetected;
-        for (unsigned int i = 0; i < count; ++i)
-        {
-            const char* name = names[i];
-            if (!detected && Logger::IsDebugEnabled())
-            {
-                nativeInit(isGameplayCamShakingWithName);
-                nativePush64(reinterpret_cast<std::uint64_t>(name));
-                if (*nativeCall() != 0)
-                {
-                    detected = true;
-                    Logger::Log(firstPerson ?
-                        "[DEBUG] DisableFirstPersonWeaponRecoil: active named first-person recoil shake detected." :
-                        "[DEBUG] DisableWeaponRecoil: active named third-person recoil shake detected.");
-                }
-            }
-            nativeInit(stopGameplayCamShakingWithName);
-            nativePush64(reinterpret_cast<std::uint64_t>(name));
-            nativePush64(1);
-            nativeCall();
-        }
-    }
-
     void SetShakeAmplitude(float amplitude)
     {
         std::uint32_t bits = 0;
@@ -533,16 +661,6 @@ namespace
         nativeInit(setGameplayCamShakeAmplitude);
         nativePush64(bits);
         nativeCall();
-    }
-
-    void ClearRecoilOverride()
-    {
-        if (recoilReductionApplied)
-        {
-            SetShakeAmplitude(1.0f);
-            recoilReductionApplied = false;
-        }
-        recoilReleaseUntil = 0;
     }
 }
 
@@ -555,6 +673,8 @@ namespace Main::Camera
         const bool effectiveMinimizeOnTabOut = minimizeOnTabOut && !v2InterfaceActive;
         fullscreenTabOutEnabled.store(effectiveFullscreenTabOut);
         minimizeOnTabOutEnabled.store(effectiveMinimizeOnTabOut);
+        if (!effectiveFullscreenTabOut && !effectiveMinimizeOnTabOut)
+            windowFocusReady = false;
         if (v2InterfaceActive)
             Logger::Log("[WARNING] Tab-out compatibility: ScriptHook V2 interface/overlay is active; BettermentImprovements automatic minimize and fullscreen restore suppressed to avoid Vulkan resize conflicts.");
         if ((!effectiveFullscreenTabOut && !effectiveMinimizeOnTabOut) || focusMonitorStarted)
@@ -576,12 +696,21 @@ namespace Main::Camera
         Logger::Log("[WARNING] Tab-out monitor: could not start; using ScriptMain fallback.");
     }
 
-    void Initialize(bool active, bool fixFullscreenTabOut, bool minimizeOnTabOut, bool disableHeadBob, bool reduceCameraShake, bool reduceCameraSway,
+    void Initialize(bool active, bool fixFullscreenTabOut, bool minimizeOnTabOut, bool disableCameraSmoothing, bool disableHeadBob, bool reduceCameraShake, bool reduceCameraSway,
         bool disableDrunkFilter, bool disableEagleEyeFilter, bool disableDeadEyeFilter,
-        bool disableWeaponWheelFilter, bool disableLowHealthFilter,
-        bool disableWeaponRecoil, bool disableFirstPersonWeaponRecoil)
+        bool disableWeaponWheelFilter, bool disableLowHealthFilter)
     {
         enabled = active;
+        if (smoothingDisabled != disableCameraSmoothing)
+        {
+            smoothingDisabled = disableCameraSmoothing;
+            smoothingScanCursor = 0;
+            if (!smoothingDisabled)
+            {
+                RestoreCameraSmoothing();
+                std::vector<std::uintptr_t>().swap(smoothingScanBuffer);
+            }
+        }
         drunkFilterDisabled = disableDrunkFilter;
         eagleEyeFilterDisabled = disableEagleEyeFilter;
         deadEyeFilterDisabled = disableDeadEyeFilter;
@@ -597,13 +726,6 @@ namespace Main::Camera
         headBobStatusReported = false;
         shakeReductionEnabled = reduceCameraShake;
         swayReductionEnabled = reduceCameraSway;
-        ClearRecoilOverride();
-        recoilReductionEnabled = disableWeaponRecoil;
-        firstPersonRecoilReductionEnabled = disableFirstPersonWeaponRecoil;
-        firstPersonRecoilStatusReported = false;
-        thirdPersonRecoilStatusReported = false;
-        firstPersonNamedShakeDetected = false;
-        thirdPersonNamedShakeDetected = false;
         shakeReductionApplied = false;
         swayStopped = false;
         swayStatusReported = false;
@@ -633,31 +755,27 @@ namespace Main::Camera
             Logger::Log("[INFO] ReduceCameraShake: enabled.");
         if (swayReductionEnabled)
             Logger::Log("[INFO] ReduceCameraSway: enabled.");
-        if (recoilReductionEnabled)
-            Logger::Log("[INFO] DisableWeaponRecoil: third-person recoil suppression enabled.");
-        if (firstPersonRecoilReductionEnabled)
-            Logger::Log("[INFO] DisableFirstPersonWeaponRecoil: first-person recoil suppression enabled.");
     }
 
     bool NeedsFastUpdate()
     {
-        return fullscreenTabOutEnabled && fullscreenRestorePending && !fullscreenGameFocused;
+        return HasCameraSmoothingWork() || (fullscreenTabOutEnabled && fullscreenRestorePending && !fullscreenGameFocused);
     }
 
     void Shutdown()
     {
+        RestoreCameraSmoothing();
         if (focusMonitorStop)
             SetEvent(focusMonitorStop);
     }
 
     void Update()
     {
+        UpdateWindowFocusReadiness();
+        UpdateCameraSmoothing();
         if (!focusMonitorStarted)
-        {
-            FixFullscreenTabOut();
-            MinimizeOnTabOut();
-        }
-        if (fullscreenTabOutEnabled && fullscreenRestorePending && !fullscreenGameFocused)
+            UpdateWindowFocus();
+        if (windowFocusReady && fullscreenTabOutEnabled && fullscreenRestorePending && !fullscreenGameFocused)
         {
             nativeInit(disableAllControlActions);
             nativePush64(0);
@@ -673,7 +791,7 @@ namespace Main::Camera
                 Logger::Log("[DEBUG] FixFullscreenTabOut: background controls restored.");
         }
         const bool cameraFeaturesEnabled = enabled || headBobReductionEnabled || shakeReductionEnabled ||
-            swayReductionEnabled || recoilReductionEnabled || firstPersonRecoilReductionEnabled;
+            swayReductionEnabled;
         if (!cameraFeaturesEnabled && !drunkFilterDisabled && !eagleEyeFilterDisabled && !deadEyeFilterDisabled &&
             !weaponWheelFilterDisabled && !lowHealthFilterDisabled)
             return;
@@ -768,17 +886,14 @@ namespace Main::Camera
 
         if (!gameplayCameraActive)
         {
-            if (recoilReductionApplied || shakeReductionApplied || headBobReductionApplied)
+            if (shakeReductionApplied || headBobReductionApplied)
                 SetShakeAmplitude(1.0f);
-            recoilReductionApplied = false;
             shakeReductionApplied = false;
             headBobReductionApplied = false;
-            recoilReleaseUntil = 0;
             return;
         }
 
-        if (!enabled && !headBobReductionEnabled && !shakeReductionEnabled && !swayReductionEnabled &&
-            !recoilReductionEnabled && !firstPersonRecoilReductionEnabled)
+        if (!enabled && !headBobReductionEnabled && !shakeReductionEnabled && !swayReductionEnabled)
             return;
 
         if (swayReductionEnabled)
@@ -822,61 +937,11 @@ namespace Main::Camera
             }
         }
 
-        if (recoilReductionEnabled || firstPersonRecoilReductionEnabled)
-        {
-            const bool firstPerson = InvokeBoolean(isFirstPersonAimCamActive) ||
-                InvokeBoolean(isInFullFirstPersonMode);
-            const bool reduceRecoil = firstPerson ? firstPersonRecoilReductionEnabled : recoilReductionEnabled;
-            if (reduceRecoil)
-            {
-                nativeInit(playerPedId);
-                const std::uint64_t ped = *nativeCall();
-                const ULONGLONG now = GetTickCount64();
-                const bool shooting = ped != 0 && PedShooting(ped);
-                const bool aiming = ped != 0 && PedArmed(ped) &&
-                    (ControlPressed(aimControl) || ControlPressed(horseAimControl));
-                if (shooting)
-                    recoilReleaseUntil = now + (firstPerson ? firstPersonRecoilReleaseMs : recoilReleaseMs);
-                if (aiming || now < recoilReleaseUntil)
-                {
-                    if (!shakeReductionEnabled)
-                    {
-                        SetShakeAmplitude(0.0f);
-                        recoilReductionApplied = true;
-                    }
-                    if (now < recoilReleaseUntil)
-                    {
-                        SuppressRecoilShakes(firstPerson);
-                        if (InvokeBoolean(isGameplayCamShaking))
-                        {
-                            nativeInit(stopGameplayCamShaking);
-                            nativePush64(1);
-                            nativeCall();
-                        }
-                    }
-                    if (shooting && firstPerson && !firstPersonRecoilStatusReported && Logger::IsDebugEnabled())
-                    {
-                        firstPersonRecoilStatusReported = true;
-                        Logger::Log("[DEBUG] DisableFirstPersonWeaponRecoil: firing detected; recoil native called (effect unverified).");
-                    }
-                    else if (shooting && !firstPerson && !thirdPersonRecoilStatusReported && Logger::IsDebugEnabled())
-                    {
-                        thirdPersonRecoilStatusReported = true;
-                        Logger::Log("[DEBUG] DisableWeaponRecoil: firing detected; recoil native called (effect unverified).");
-                    }
-                }
-                else if (recoilReductionApplied || recoilReleaseUntil != 0)
-                    ClearRecoilOverride();
-            }
-            else if (recoilReductionApplied || recoilReleaseUntil != 0)
-                ClearRecoilOverride();
-        }
-
         if (headBobReductionEnabled)
         {
             nativeInit(playerPedId);
             const std::uint64_t ped = *nativeCall();
-            const bool shouldSuppress = !recoilReductionApplied && PedMovingOnFootOrMount(ped);
+            const bool shouldSuppress = PedMovingOnFootOrMount(ped);
             if (shouldSuppress)
             {
                 SetShakeAmplitude(0.0f);
@@ -889,8 +954,7 @@ namespace Main::Camera
             }
             else if (headBobReductionApplied)
             {
-                if (!recoilReductionApplied)
-                    SetShakeAmplitude(1.0f);
+                SetShakeAmplitude(1.0f);
                 headBobReductionApplied = false;
             }
         }

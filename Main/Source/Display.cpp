@@ -85,6 +85,21 @@ namespace
             &intensity, sizeof(intensity), &written) && written == sizeof(intensity);
     }
 
+    inline bool ExchangeWeatherIntensity(std::uintptr_t address, std::uint16_t expected, std::uint16_t replacement)
+    {
+        __try
+        {
+            auto* value = reinterpret_cast<volatile SHORT*>(address);
+            return static_cast<std::uint16_t>(InterlockedCompareExchange16(value,
+                static_cast<SHORT>(replacement), static_cast<SHORT>(expected))) == expected;
+        }
+        __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ||
+            GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR || GetExceptionCode() == EXCEPTION_GUARD_PAGE ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
+        {
+            return false;
+        }
+    }
+
     struct SavedIntensity
     {
         std::uintptr_t modifier;
@@ -153,7 +168,10 @@ namespace
             if (!id)
                 continue;
 
-            for (std::size_t field = 0; field < fields.size(); ++field)
+            bool verified = false;
+            bool recordCurrent = true;
+            MEMORY_BASIC_INFORMATION region{};
+            for (std::size_t field = 0; recordCurrent && field < fields.size(); ++field)
             {
                 for (std::size_t keyframe = 0; keyframe < keyframeCount; ++keyframe)
                 {
@@ -164,7 +182,7 @@ namespace
 
                     auto& snapshot = original.intensity[field][keyframe];
                     const bool nonzero = (value & 0x7FFFu) != 0;
-                    if (!enabled && nonzero)
+                    if (!enabled && value != 0)
                     {
                         snapshot = 0;
                         continue;
@@ -172,25 +190,34 @@ namespace
                     if (enabled ? !nonzero : snapshot == 0)
                         continue;
 
-                    std::uintptr_t currentTable = 0;
-                    std::uint32_t currentId = 0;
-                    std::uint16_t currentValue = 0;
-                    if (!Read(manager + 0x68, &currentTable, sizeof(currentTable)) || currentTable != table ||
-                        !Read(recordAddress + weatherIdOffset, &currentId, sizeof(currentId)) || currentId != id)
-                        break;
-                    if (!Read(address, &currentValue, sizeof(currentValue)) || currentValue != value)
-                        continue;
+                    if (!verified)
+                    {
+                        std::uintptr_t currentTable = 0;
+                        std::uint32_t currentId = 0;
+                        if (!Read(manager + 0x68, &currentTable, sizeof(currentTable)) || currentTable != table ||
+                            !Read(recordAddress + weatherIdOffset, &currentId, sizeof(currentId)) || currentId != id)
+                        {
+                            recordCurrent = false;
+                            break;
+                        }
+                        verified = true;
+                    }
 
-                    MEMORY_BASIC_INFORMATION region{};
-                    if (!VirtualQuery(reinterpret_cast<const void*>(address), &region, sizeof(region)) ||
-                        region.State != MEM_COMMIT || (region.Protect & PAGE_GUARD) ||
+                    const auto regionStart = reinterpret_cast<std::uintptr_t>(region.BaseAddress);
+                    if (address < regionStart || address - regionStart >= region.RegionSize)
+                    {
+                        if (!VirtualQuery(reinterpret_cast<const void*>(address), &region, sizeof(region)))
+                        {
+                            region = {};
+                            continue;
+                        }
+                    }
+                    if (region.State != MEM_COMMIT || (region.Protect & PAGE_GUARD) ||
                         (region.Protect & 0xFF) != PAGE_READWRITE)
                         continue;
 
                     const std::uint16_t replacement = enabled ? 0 : snapshot;
-                    SIZE_T written = 0;
-                    if (WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address),
-                        &replacement, sizeof(replacement), &written) && written == sizeof(replacement))
+                    if (ExchangeWeatherIntensity(address, value, replacement))
                     {
                         snapshot = enabled ? value : 0;
                         ++changed;

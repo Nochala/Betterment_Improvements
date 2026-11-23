@@ -423,8 +423,6 @@ namespace
             { L"Weapons", L"DisableArrowTrails", L"false" },
             { L"Weapons", L"DisableReticleSpread", L"false" },
             { L"Weapons", L"DisableReticleSway", L"false" },
-            { L"Weapons", L"DisableWeaponRecoil", L"false" },
-            { L"Weapons", L"DisableFirstPersonWeaponRecoil", L"false" },
             { L"Weapons", L"DisableWeaponDegradation", L"false" },
             { L"Visual", L"RemoveBlackBars", L"true" },
             { L"Visual", L"DisableVignette", L"false" },
@@ -437,6 +435,7 @@ namespace
             { L"Visual", L"DisableIdleCamera", L"true" },
             { L"Visual", L"ReduceCameraShake", L"false" },
             { L"Visual", L"ReduceCameraSway", L"false" },
+            { L"Visual", L"DisableCameraSmoothing", L"false" },
             { L"Visual", L"DisableHeadBob", L"false" },
             { L"Visual", L"CameraFOVOffset", L"0.0" },
             { L"Visual", L"DisableInteriorLighting", L"false" },
@@ -494,8 +493,6 @@ namespace
             { L"Weapons", L"DisableArrowTrails", "AIMING & EFFECTS" },
             { L"Weapons", L"DisableReticleSpread", "AIMING & EFFECTS" },
             { L"Weapons", L"DisableReticleSway", "AIMING & EFFECTS" },
-            { L"Weapons", L"DisableWeaponRecoil", "AIMING & EFFECTS" },
-            { L"Weapons", L"DisableFirstPersonWeaponRecoil", "AIMING & EFFECTS" },
             { L"Weapons", L"DisableWeaponDegradation", "MAINTENANCE" },
             { L"Visual", L"RemoveBlackBars", "DISPLAY" },
             { L"Visual", L"DisableVignette", "Graphics" },
@@ -508,6 +505,7 @@ namespace
             { L"Visual", L"DisableIdleCamera", "CAMERA" },
             { L"Visual", L"ReduceCameraShake", "CAMERA" },
             { L"Visual", L"ReduceCameraSway", "CAMERA" },
+            { L"Visual", L"DisableCameraSmoothing", "CAMERA" },
             { L"Visual", L"DisableHeadBob", "CAMERA" },
             { L"Visual", L"CameraFOVOffset", "CAMERA" },
             { L"Visual", L"DisableInteriorLighting", "WORLD" },
@@ -917,7 +915,7 @@ namespace
             if (Same(name, L"Player")) return "Player movement and interaction settings.";
             if (Same(name, L"Horse")) return "Horse behavior and riding options.";
             if (Same(name, L"Gameplay")) return "Gameplay behavior, Honor, and bounty settings.";
-            if (Same(name, L"Weapons")) return "Weapon behavior, recoil, and reticle settings.";
+            if (Same(name, L"Weapons")) return "Weapon behavior and reticle settings.";
             if (Same(name, L"Ambient") || Same(name, L"Ambience")) return "Ambient, combat, and wanted music options.";
             if (Same(name, L"Startup")) return "Startup and loading-screen options.";
             if (Same(name, L"Diagnostics")) return "Diagnostic options used to investigate problems.";
@@ -971,7 +969,7 @@ namespace
             { L"CameraFOVOffset", "Adjusts the camera field-of-view offset." },
             { L"EnableDLSSAutoExposure", "Enables automatic exposure handling for DLSS." },
             { L"DisableInteriorLighting", "Disables interior lighting effects." },
-            { L"DisableDistantLights", "Disables distant light rendering." },
+            { L"DisableDistantLights", "Disables distant light rendering. This causes bloom artifacts." },
             { L"DisableDrunkFilter", "Removes the screen filter used while the player is drunk." },
             { L"DisableEagleEyeFilter", "Removes the Eagle Eye screen color filter." },
             { L"DisableDeadEyeFilter", "Removes the Dead Eye screen color filter." },
@@ -980,6 +978,7 @@ namespace
             { L"DisableIdleCamera", "Prevents the automatic idle camera from activating." },
             { L"FixFullscreenTabOut", "Fixes fullscreen behavior when switching out of the game." },
             { L"MinimizeOnTabOut", "Minimizes the game when tabbing out." },
+            { L"DisableCameraSmoothing", "Disables movement-based camera smoothing when looking around in third person." },
             { L"DisableHeadBob", "Removes camera bobbing from movement." },
             { L"ReduceCameraShake", "Reduces shake applied to the gameplay camera." },
             { L"ReduceCameraSway", "Reduces swaying motion applied to the camera." },
@@ -1008,8 +1007,6 @@ namespace
             { L"DisableArrowTrails", "Removes visible projectile trails from arrows." },
             { L"DisableReticleSpread", "Removes reticle expansion from weapon handling." },
             { L"DisableReticleSway", "Disables reticle sway." },
-            { L"DisableWeaponRecoil", "Suppresses weapon recoil camera shake in third-person view." },
-            { L"DisableFirstPersonWeaponRecoil", "Suppresses weapon recoil camera shake in first-person view." },
             { L"DisableForcedScope", "Prevents forced scope view for supported weapons." },
             { L"DisableWeaponDegradation", "Prevents weapons from degrading through use." },
             { L"DisableHitmarkers", "Hides the hitmarker feedback when shots connect." },
