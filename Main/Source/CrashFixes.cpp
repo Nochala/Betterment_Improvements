@@ -2617,7 +2617,7 @@ namespace
     using PackfileInitializer = void(__fastcall*)(int);
     constexpr int requestedPackfileEntries = 10000;
     constexpr std::uint32_t pedMebibyte = 1024U * 1024U;
-    constexpr std::uint32_t pedRequestedBytes = 1024U * pedMebibyte;
+    constexpr std::uint32_t pedRequestedBytes = 2560U * pedMebibyte;
     std::uint8_t* pedMemoryState = nullptr;
     std::uint8_t* pedMemoryBudget = nullptr;
     std::atomic<bool> pedMemoryStarted{false};
@@ -2933,9 +2933,9 @@ namespace Main::CrashFixes
         {
             char message[220] = {};
             std::snprintf(message, sizeof(message),
-                "ExtendPedMemoryLimits: state at RDR2.exe+0x%llX, budget at RDR2.exe+0x%llX (target 1024 MiB).",
+                "ExtendPedMemoryLimits: state at RDR2.exe+0x%llX, budget at RDR2.exe+0x%llX (target %u MiB).",
                 static_cast<unsigned long long>(stateTarget - image),
-                static_cast<unsigned long long>(budgetTarget - image));
+                static_cast<unsigned long long>(budgetTarget - image), pedRequestedBytes / pedMebibyte);
             Logger::Debug(message);
         }
         ObservePedMemoryLimits();

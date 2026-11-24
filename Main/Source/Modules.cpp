@@ -719,6 +719,117 @@ namespace
         }
     }
 
+    constexpr std::uint64_t isUiBindingValid = 0x1E7130793AAAAB8DULL;
+    constexpr std::uint64_t readUiBindingBool = 0x5EEFBD4B6D7CD6EBULL;
+    constexpr std::uint64_t readUiBindingString = 0x3D290B5FFA7C5151ULL;
+    constexpr std::uint64_t writeUiBindingString = 0xE1BD342F2872AEE9ULL;
+    constexpr char unknownSuspectLabel[] = "LAW_UI_UNKNOWN_SUSPECT";
+    constexpr char arthurNameLabel[] = "POSTER_PL_ARTHUR_NAME";
+    constexpr char johnNameLabel[] = "POSTER_PL_JOHN_NAME";
+
+    struct WantedHudEntry
+    {
+        int visibleIndex;
+        int nameIndex;
+        std::uint32_t ownedBinding = 0;
+        const char* originalLabel = nullptr;
+    };
+
+    // short_update on 1.0.1491.50: investigation and pursuit name fields.
+    constexpr int wantedHudBase = 1934266 + 78;
+    WantedHudEntry wantedHudEntries[] = {
+        { wantedHudBase + 19 + 1, wantedHudBase + 19 + 5 },
+        { wantedHudBase + 37 + 1, wantedHudBase + 37 + 4 }
+    };
+
+    bool SupportsWantedHudBindings()
+    {
+        const auto* image = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
+        if (!image)
+            return false;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 || dos->e_lfanew > 4096)
+            return false;
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(image + dos->e_lfanew);
+        return nt->Signature == IMAGE_NT_SIGNATURE && nt->FileHeader.TimeDateStamp == 0x65EEC92E &&
+            nt->OptionalHeader.SizeOfImage == 0x7397600;
+    }
+
+    bool ReadWantedHudBool(std::uint64_t native, std::uint32_t argument)
+    {
+        nativeInit(native);
+        nativePush64(argument);
+        const auto* result = nativeCall();
+        return result && static_cast<std::uint32_t>(*result) != 0;
+    }
+
+    std::uint32_t GetWantedHudBinding(int index)
+    {
+        const auto* slot = getGlobalPtr(index);
+        const auto binding = slot ? static_cast<std::uint32_t>(*slot) : 0;
+        return binding && ReadWantedHudBool(isUiBindingValid, binding) ? binding : 0;
+    }
+
+    void WriteWantedHudLabel(std::uint32_t binding, const char* label)
+    {
+        nativeInit(writeUiBindingString);
+        nativePush64(binding);
+        nativePush64(reinterpret_cast<std::uint64_t>(label));
+        nativeCall();
+    }
+
+    void UpdateMaskedWantedHud()
+    {
+        const bool eligible = preventBounty && wearingMask && bountyProtected && !bountyMissionSuspended;
+        if (!eligible && !wantedHudEntries[0].ownedBinding && !wantedHudEntries[1].ownedBinding)
+            return;
+        static const bool supportedBuild = SupportsWantedHudBindings();
+        if (!supportedBuild)
+            return;
+
+        const bool showUnknown = eligible && ReadWantedHudBool(lawIncidentActive, GetPlayer());
+        for (auto& entry : wantedHudEntries)
+        {
+            const auto binding = GetWantedHudBinding(entry.nameIndex);
+            if (entry.ownedBinding != binding)
+            {
+                entry.ownedBinding = 0;
+                entry.originalLabel = nullptr;
+            }
+            const auto visible = showUnknown ? GetWantedHudBinding(entry.visibleIndex) : 0;
+            const bool apply = visible && ReadWantedHudBool(readUiBindingBool, visible);
+            if (!binding || (!apply && !entry.ownedBinding))
+                continue;
+
+            nativeInit(readUiBindingString);
+            nativePush64(binding);
+            const auto* result = nativeCall();
+            const auto* label = result ? reinterpret_cast<const char*>(*result) : nullptr;
+            if (!label)
+                continue;
+            if (!apply)
+            {
+                if (std::strcmp(label, unknownSuspectLabel) == 0)
+                    WriteWantedHudLabel(binding, entry.originalLabel);
+                entry.ownedBinding = 0;
+                entry.originalLabel = nullptr;
+                continue;
+            }
+
+            if (std::strcmp(label, arthurNameLabel) == 0)
+                entry.originalLabel = arthurNameLabel;
+            else if (std::strcmp(label, johnNameLabel) == 0)
+                entry.originalLabel = johnNameLabel;
+            else
+                continue;
+
+            WriteWantedHudLabel(binding, unknownSuspectLabel);
+            if (entry.ownedBinding != binding && Logger::IsDebugEnabled())
+                Logger::Log("[DEBUG] MaskedGameplay: Wanted HUD name replaced with Unknown Suspect.");
+            entry.ownedBinding = binding;
+        }
+    }
+
     void ResetMaskState()
     {
         wearingMask = false;
@@ -930,8 +1041,9 @@ namespace
                         const int restoredBounty = GetCurrentBounty(player);
                         char message[180];
                         std::snprintf(message, sizeof(message),
-                            "[DEBUG] MaskedGameplay: bounty %d -> %d corrected; readback=%d, incident=%d, recentCrime=%d.",
-                            bounty, protectedBounty, restoredBounty, lawActive ? 1 : 0, recentCrime ? 1 : 0);
+                            "[DEBUG] MaskedGameplay: bounty %d -> %d, readback=%d, incident=%d, recentCrime=%d, storedSlot=%d, regionalSlot=%d.",
+                            bounty, protectedBounty, restoredBounty, lawActive ? 1 : 0, recentCrime ? 1 : 0,
+                            storedBounty != nullptr, regionalBounty != nullptr);
                         Logger::Log(message);
                         lastBountyCorrection = bounty;
                         lastBountyCorrectionLogAt = now;
@@ -1004,6 +1116,7 @@ namespace Main
             settings.enabled && settings.reduceCameraShake,
             settings.enabled && settings.reduceCameraSway,
             settings.enabled && settings.disableDrunkFilter,
+            settings.enabled && settings.disablePauseMenuFilter,
             settings.enabled && settings.disableEagleEyeFilter,
             settings.enabled && settings.disableDeadEyeFilter,
             settings.enabled && settings.disableWeaponWheelFilter,
@@ -1093,6 +1206,7 @@ namespace Main
         UpdateHonorEventFilters();
         UpdateDisabledBounties();
         UpdateMaskedGameplay();
+        UpdateMaskedWantedHud();
         SelfDefense::Update();
         UpdateOutOfBoundsFeatures();
     }

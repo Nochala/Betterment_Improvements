@@ -6,6 +6,7 @@
 #include "../../Headers/Gunz.h"
 #include "../../Headers/Horse.h"
 #include "../../Headers/Lighting.h"
+#include "../../Headers/Looting.h"
 #include "../../Headers/Player.h"
 #include "../../../Headers/GameplayFixes.h"
 #include "../../../Headers/Logger.h"
@@ -37,8 +38,7 @@ namespace Main::ModReload
             L"OptimizeStreamingMemory", L"TextureStreamingStutterFix", L"ImproveTextureStreaming",
             L"ExpandSSRCoverage", L"SSROverscanScale", L"SSROverscanTestMode",
             L"CrashDiagnostics", L"DumpNativeHashes", L"EnableDLSSAutoExposure",
-            L"RemoveBlackBars", L"SkipIntroSplashes", L"SkipLegal", L"StraightToStoryMode",
-            L"DisableAutoAmmoPickup"
+            L"RemoveBlackBars", L"SkipIntroSplashes", L"SkipLegal", L"StraightToStoryMode"
         };
         for (const wchar_t* restartKey : keys)
             if (matches(key, restartKey))
@@ -75,8 +75,10 @@ namespace Main::ModReload
         keepStartup(current.skipIntroSplashes, next.skipIntroSplashes);
         keepStartup(current.skipLegal, next.skipLegal);
         keepStartup(current.straightToStoryMode, next.straightToStoryMode);
-        keepStartup(current.noAutoAmmoPickup, next.noAutoAmmoPickup);
         keepStartup(current.removeBlackBars, next.removeBlackBars);
+
+        if (current.noAutoAmmoPickup != next.noAutoAmmoPickup)
+            Main::Looting::SetNoAutoAmmoPickup(next.enabled && next.noAutoAmmoPickup);
 
         if (current.disableAmbientMusic != next.disableAmbientMusic ||
             current.disableCombatMusic != next.disableCombatMusic ||
@@ -99,6 +101,7 @@ namespace Main::ModReload
             current.reduceCameraShake != next.reduceCameraShake ||
             current.reduceCameraSway != next.reduceCameraSway ||
             current.disableDrunkFilter != next.disableDrunkFilter ||
+            current.disablePauseMenuFilter != next.disablePauseMenuFilter ||
             current.disableEagleEyeFilter != next.disableEagleEyeFilter ||
             current.disableDeadEyeFilter != next.disableDeadEyeFilter ||
             current.disableWeaponWheelFilter != next.disableWeaponWheelFilter ||
@@ -112,6 +115,7 @@ namespace Main::ModReload
                 next.enabled && next.reduceCameraShake,
                 next.enabled && next.reduceCameraSway,
                 next.enabled && next.disableDrunkFilter,
+                next.enabled && next.disablePauseMenuFilter,
                 next.enabled && next.disableEagleEyeFilter,
                 next.enabled && next.disableDeadEyeFilter,
                 next.enabled && next.disableWeaponWheelFilter,

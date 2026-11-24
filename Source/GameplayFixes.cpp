@@ -646,7 +646,6 @@ namespace
         {
             { L"Visual", L"RemoveCameraFade" },
             { L"Visual", L"DisableFilmGrain" },
-            { L"Visual", L"DisablePauseMenuFilter" },
             { L"Visual", L"ReduceWeaponRecoil" },
             { L"Visual", L"RecoilShakeAmplitudeScale" },
             { L"Visual", L"ReduceFirstPersonWeaponRecoil" },
@@ -681,6 +680,11 @@ namespace
         GetPrivateProfileStringW(L"Visual", L"DisableDrunkFilter", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Visual", L"DisableDrunkFilter", L"false", "Visual.DisableDrunkFilter") && success;
+
+        existing[0] = L'\0';
+        GetPrivateProfileStringW(L"Visual", L"DisablePauseMenuFilter", L"", existing, 8, path.c_str());
+        if (existing[0] == L'\0')
+            success = WriteIniValue(path, L"Visual", L"DisablePauseMenuFilter", L"false", "Visual.DisablePauseMenuFilter") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableEagleEyeFilter", L"", existing, 8, path.c_str());
@@ -937,6 +941,7 @@ namespace
         { L"Visual", L"FixFullscreenTabOut", &GameplayFixes::Settings::fixFullscreenTabOut, false },
         { L"Visual", L"MinimizeOnTabOut", &GameplayFixes::Settings::minimizeOnTabOut, false },
         { L"Visual", L"DisableDrunkFilter", &GameplayFixes::Settings::disableDrunkFilter, false },
+        { L"Visual", L"DisablePauseMenuFilter", &GameplayFixes::Settings::disablePauseMenuFilter, false },
         { L"Visual", L"DisableEagleEyeFilter", &GameplayFixes::Settings::disableEagleEyeFilter, false },
         { L"Visual", L"DisableDeadEyeFilter", &GameplayFixes::Settings::disableDeadEyeFilter, false },
         { L"Visual", L"DisableWeaponWheelFilter", &GameplayFixes::Settings::disableWeaponWheelFilter, false },
@@ -1087,6 +1092,7 @@ namespace GameplayFixes
             ", FixFullscreenTabOut=" + (settings.fixFullscreenTabOut ? "true" : "false") +
             ", MinimizeOnTabOut=" + (settings.minimizeOnTabOut ? "true" : "false") +
             ", DisableDrunkFilter=" + (settings.disableDrunkFilter ? "true" : "false") +
+            ", DisablePauseMenuFilter=" + (settings.disablePauseMenuFilter ? "true" : "false") +
             ", DisableEagleEyeFilter=" + (settings.disableEagleEyeFilter ? "true" : "false") +
             ", DisableDeadEyeFilter=" + (settings.disableDeadEyeFilter ? "true" : "false") +
             ", DisableWeaponWheelFilter=" + (settings.disableWeaponWheelFilter ? "true" : "false") +
@@ -1200,7 +1206,7 @@ namespace GameplayFixes
     {
         if (Main::ConfigMenu::IsOpen())
             return 0U;
-        return settings.enabled && (settings.disableDrunkFilter || settings.disableEagleEyeFilter ||
+        return settings.enabled && (settings.disableEagleEyeFilter ||
             settings.disableDeadEyeFilter || settings.disableWeaponWheelFilter ||
             settings.disableLowHealthFilter || settings.disableIdleCamera || settings.disableHeadBob || settings.reduceCameraShake ||
             settings.reduceCameraSway || settings.disableAutoReload || settings.disableEmptyAutoReload ||

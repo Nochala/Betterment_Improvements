@@ -1119,7 +1119,7 @@ namespace
         nextWeaponConditionRefresh = now + 250;
 
         nativeInit(getLoadingScreenActive);
-        if (*nativeCall() != 0)
+        if (static_cast<std::uint32_t>(*nativeCall()) != 0)
             return;
         nativeInit(playerPedId);
         const int ped = static_cast<int>(*nativeCall());
@@ -1127,7 +1127,7 @@ namespace
             return;
         nativeInit(doesEntityExist);
         nativePush64(static_cast<std::uint32_t>(ped));
-        if (*nativeCall() == 0)
+        if (static_cast<std::uint32_t>(*nativeCall()) == 0)
             return;
 
         int previousWeaponObject = 0;
@@ -1141,7 +1141,7 @@ namespace
                 continue;
             nativeInit(doesEntityExist);
             nativePush64(static_cast<std::uint32_t>(weaponObject));
-            if (*nativeCall() == 0)
+            if (static_cast<std::uint32_t>(*nativeCall()) == 0)
                 continue;
             previousWeaponObject = weaponObject;
 
@@ -1170,7 +1170,7 @@ namespace
     bool IsArrowTrailWorldReady()
     {
         nativeInit(getLoadingScreenActive);
-        if (*nativeCall() != 0)
+        if (static_cast<std::uint32_t>(*nativeCall()) != 0)
             return false;
         nativeInit(playerPedId);
         const int player = static_cast<int>(*nativeCall());
@@ -1178,7 +1178,7 @@ namespace
             return false;
         nativeInit(doesEntityExist);
         nativePush64(static_cast<std::uint32_t>(player));
-        return *nativeCall() != 0;
+        return static_cast<std::uint32_t>(*nativeCall()) != 0;
     }
 
     bool ApplyArrowTrailFx(std::uint32_t fx)
@@ -1194,7 +1194,7 @@ namespace
             {
                 nativeInit(doesEntityExist);
                 nativePush64(static_cast<std::uint32_t>(peds[i]));
-                if (*nativeCall() == 0)
+                if (static_cast<std::uint32_t>(*nativeCall()) == 0)
                     continue;
             }
             nativeInit(setArrowTrailFx);
@@ -1223,7 +1223,7 @@ namespace
 
         nativeInit(doesEntityExist);
         nativePush64(static_cast<std::uint32_t>(ped));
-        if (*nativeCall() != 0)
+        if (static_cast<std::uint32_t>(*nativeCall()) != 0)
         {
             nativeInit(getPedAccuracy);
             nativePush64(static_cast<std::uint32_t>(ped));
@@ -1254,7 +1254,7 @@ namespace
 
         nativeInit(doesEntityExist);
         nativePush64(static_cast<std::uint32_t>(ped));
-        if (*nativeCall() == 0)
+        if (static_cast<std::uint32_t>(*nativeCall()) == 0)
         {
             RestoreReticleAccuracy(ped);
             return;
@@ -1278,7 +1278,7 @@ namespace
         nativePush64(1);
         nativePush64(0);
         nativePush64(0);
-        if (*nativeCall() == 0 || weapon == 0)
+        if (static_cast<std::uint32_t>(*nativeCall()) == 0 || weapon == 0)
         {
             RestoreReticleAccuracy(ped);
             return;
@@ -2936,7 +2936,7 @@ namespace
             return;
         nativeInit(doesEntityExist);
         nativePush64(static_cast<std::uint32_t>(snapshot.entity));
-        if (*nativeCall() == 0)
+        if (static_cast<std::uint32_t>(*nativeCall()) == 0)
         {
             snapshot.entity = 0;
             return;
@@ -2946,7 +2946,7 @@ namespace
         nativePush64(static_cast<std::uint32_t>(snapshot.entity));
         nativePush64(snapshot.weapon == carcanoWeapon || snapshot.weapon == rollingBlockWeapon ||
             snapshot.weapon == exoticRollingBlockWeapon ? longScopeComponent : shortScopeComponent);
-        snapshot.objectAttached = *nativeCall() != 0;
+        snapshot.objectAttached = static_cast<std::uint32_t>(*nativeCall()) != 0;
         if (snapshot.weapon != carcanoWeapon && snapshot.weapon != rollingBlockWeapon &&
             snapshot.weapon != exoticRollingBlockWeapon && !snapshot.objectAttached)
             return;
@@ -3234,7 +3234,7 @@ namespace
                 nativePush64(1);
                 nativePush64(0);
                 nativePush64(0);
-                if (*nativeCall() != 0 &&
+                if (static_cast<std::uint32_t>(*nativeCall()) != 0 &&
                     ((!scopeCarcanoPatched && weapon == carcanoWeapon) ||
                     (!rollingScopeMetadataLogged[0] && weapon == rollingBlockWeapon) ||
                     (!rollingScopeMetadataLogged[1] && weapon == exoticRollingBlockWeapon)))
@@ -3624,7 +3624,7 @@ namespace Main
             {
                 nativeInit(doesEntityExist);
                 nativePush64(static_cast<std::uint32_t>(ped));
-                if (*nativeCall() != 0)
+                if (static_cast<std::uint32_t>(*nativeCall()) != 0)
                     address = reinterpret_cast<std::uintptr_t>(getScriptHandleBaseAddress(ped));
             }
             playerAddress.store(address, std::memory_order_relaxed);

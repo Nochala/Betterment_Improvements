@@ -441,6 +441,7 @@ namespace
             { L"Visual", L"DisableInteriorLighting", L"false" },
             { L"Visual", L"DisableDistantLights", L"false" },
             { L"Visual", L"DisableDrunkFilter", L"false" },
+            { L"Visual", L"DisablePauseMenuFilter", L"false" },
             { L"Visual", L"DisableEagleEyeFilter", L"false" },
             { L"Visual", L"DisableDeadEyeFilter", L"false" },
             { L"Visual", L"DisableWeaponWheelFilter", L"false" },
@@ -511,6 +512,7 @@ namespace
             { L"Visual", L"DisableInteriorLighting", "WORLD" },
             { L"Visual", L"DisableDistantLights", "WORLD" },
             { L"Visual", L"DisableDrunkFilter", "FILTERS" },
+            { L"Visual", L"DisablePauseMenuFilter", "FILTERS" },
             { L"Visual", L"DisableEagleEyeFilter", "FILTERS" },
             { L"Visual", L"DisableDeadEyeFilter", "FILTERS" },
             { L"Visual", L"DisableWeaponWheelFilter", "FILTERS" },
@@ -699,7 +701,7 @@ namespace
         nativeInit(hasStreamedTextureDictLoaded);
         nativePush64(reinterpret_cast<std::uint64_t>(dictionary));
         const auto result = nativeCall();
-        return result && *result != 0;
+        return result && static_cast<std::uint32_t>(*result) != 0;
     }
 
     void RequestTextureDictionary(const char* dictionary)
@@ -971,6 +973,7 @@ namespace
             { L"DisableInteriorLighting", "Disables interior lighting effects." },
             { L"DisableDistantLights", "Disables distant light rendering. This causes bloom artifacts." },
             { L"DisableDrunkFilter", "Removes the screen filter used while the player is drunk." },
+            { L"DisablePauseMenuFilter", "Removes the screen filter used by the pause menu." },
             { L"DisableEagleEyeFilter", "Removes the Eagle Eye screen color filter." },
             { L"DisableDeadEyeFilter", "Removes the Dead Eye screen color filter." },
             { L"DisableWeaponWheelFilter", "Removes the filter shown when opening the weapon wheel." },

@@ -1,10 +1,11 @@
 #pragma once
 
+#include "../../Headers/Version.h"
 #include <string>
 
 namespace Main::NotifStats
 {
-    inline constexpr char Version[] = "v1.0.1";
+    inline constexpr auto& Version = ::Version::Mod;
 
     void Configure(bool enabled, bool settingsMenu = true, int menuKey = 0x77, unsigned int menuModifier = 0);
     void Update();

@@ -110,6 +110,7 @@ namespace
 
     BOOL CALLBACK LogVersionsOnce(PINIT_ONCE, PVOID, PVOID*)
     {
+        Logger::Log((std::string("[VERSION] Betterment Improvements ") + Version::Mod + ".").c_str());
         wchar_t gamePath[MAX_PATH] = {};
         const DWORD gamePathLength = GetModuleFileNameW(nullptr, gamePath, MAX_PATH);
         const FileVersion gameVersion = gamePathLength != 0 && gamePathLength < MAX_PATH ?

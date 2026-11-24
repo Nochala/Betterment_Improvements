@@ -163,8 +163,11 @@ namespace
         return static_cast<std::uint32_t>(*nativeCall()) != 0;
     }
 
+    void ResetMountedCarrySnapshot();
+
     void ResetWeaponTracking()
     {
+        ResetMountedCarrySnapshot();
         for (int i = 0; i < 5; ++i)
         {
             trackedWeapons[i] = 0;
@@ -226,13 +229,27 @@ namespace
     }
 
     using WeaponSelection = bool(*)(const void*, const void*, const void*, const void*);
-    constexpr std::uintptr_t timedSelectionCallRva = 0x1102D2E;
-    constexpr std::uintptr_t weaponSelectionRva = 0x114C140;
-    constexpr std::uint8_t originalTimedSelectionCall[] = { 0xE8, 0x0D, 0x94, 0x04, 0x00 };
+    using FistsSelection = bool(*)(const void*, const void*);
+    using GetWeaponManager = std::uintptr_t(*)(std::uintptr_t);
+
+    struct SelectionCall
+    {
+        std::uint8_t* site = nullptr;
+        std::uint8_t patch[5] = {};
+    };
+
+    constexpr std::uint8_t timedSelectionBytes[] = {
+        0xE8, 0x0D, 0x94, 0x04, 0x00, 0x48, 0x83, 0xC4, 0x40, 0x5B, 0xC3
+    };
+    constexpr std::uint8_t queuedFistsBytes[] = {
+        0xE8, 0xE5, 0xA8, 0x04, 0x00, 0x48, 0x83, 0xC4, 0x38, 0xC3
+    };
     std::atomic<std::uintptr_t> mountedPlayerAddress{ 0 };
     WeaponSelection originalWeaponSelection = nullptr;
-    std::uint8_t* timedSelectionCall = nullptr;
-    std::uint8_t timedSelectionPatch[sizeof(originalTimedSelectionCall)] = {};
+    FistsSelection originalFistsSelection = nullptr;
+    GetWeaponManager getWeaponManager = nullptr;
+    SelectionCall timedSelectionCall;
+    SelectionCall queuedFistsCall;
 
     struct WeaponIdentity
     {
@@ -262,6 +279,87 @@ namespace
         if (ReadGameValue(manager + 0x98 + slot, index) && index != 0xFF)
             ReadGameValue(slots + index * sizeof(entry), entry);
         return entry;
+    }
+
+    SRWLOCK mountedCarryLock = SRWLOCK_INIT;
+    std::uintptr_t mountedCarryOwner = 0;
+    WeaponIdentity mountedCarry[4] = {};
+
+    void ResetMountedCarrySnapshot()
+    {
+        AcquireSRWLockExclusive(&mountedCarryLock);
+        mountedCarryOwner = 0;
+        ReleaseSRWLockExclusive(&mountedCarryLock);
+    }
+
+    void UpdateMountedCarrySnapshot()
+    {
+        const auto player = mountedPlayerAddress.load(std::memory_order_acquire);
+        if (!player || !getWeaponManager || !queuedFistsCall.site)
+            return;
+
+        const auto manager = getWeaponManager(player);
+        std::uintptr_t owner = 0, slots = 0;
+        if (!manager || !ReadGameValue(manager + 0x20, owner) || owner != player ||
+            !ReadGameValue(manager + 0x88, slots) || !slots)
+            return;
+
+        const auto hand = WeaponSlotEntry(manager, slots, horseWeaponPoints[0]);
+        WeaponIdentity current = {}, pending = {};
+        if (!hand || !ReadGameValue(hand + 8, current) || !ReadGameValue(hand + 0x28, pending) ||
+            !(current == unarmedIdentity) || !(pending == unarmedIdentity))
+            return;
+
+        WeaponIdentity carried[4] = {};
+        for (int i = 1; i < 5; ++i)
+        {
+            const auto carry = WeaponSlotEntry(manager, slots, horseWeaponPoints[i]);
+            std::uintptr_t weapon = 0;
+            if (carry && ReadGameValue(carry + 0x68, weapon) && weapon)
+                ReadGameValue(carry + 8, carried[i - 1]);
+        }
+
+        AcquireSRWLockExclusive(&mountedCarryLock);
+        std::memcpy(mountedCarry, carried, sizeof(carried));
+        mountedCarryOwner = player;
+        ReleaseSRWLockExclusive(&mountedCarryLock);
+    }
+
+    bool PreserveMountedDraw(std::uintptr_t manager, std::uintptr_t options)
+    {
+        const auto player = mountedPlayerAddress.load(std::memory_order_acquire);
+        std::uintptr_t owner = 0, slots = 0;
+        std::uint32_t requestedSlot = 0;
+        if (!player || !manager || !ReadGameValue(options, requestedSlot) || requestedSlot != 0 ||
+            !ReadGameValue(manager + 0x20, owner) || owner != player ||
+            !ReadGameValue(manager + 0x88, slots) || !slots)
+            return false;
+
+        const auto hand = WeaponSlotEntry(manager, slots, horseWeaponPoints[0]);
+        WeaponIdentity current = {}, pending = {};
+        std::uintptr_t weapon = 0;
+        if (!hand || !ReadGameValue(hand + 8, current) || current == unarmedIdentity || !current.high ||
+            !ReadGameValue(hand + 0x28, pending) || !(pending == current) ||
+            !ReadGameValue(hand + 0x68, weapon) || !weapon)
+            return false;
+
+        bool wasCarried = false;
+        AcquireSRWLockShared(&mountedCarryLock);
+        if (mountedCarryOwner == player)
+        {
+            for (const auto& identity : mountedCarry)
+                wasCarried |= identity == current;
+        }
+        ReleaseSRWLockShared(&mountedCarryLock);
+        return wasCarried;
+    }
+
+    bool OnQueuedFistsSelection(const void* manager, const void* options)
+    {
+        if (PreserveMountedDraw(reinterpret_cast<std::uintptr_t>(manager),
+            reinterpret_cast<std::uintptr_t>(options)))
+            return false;
+        return originalFistsSelection(manager, options);
     }
 
     bool PreserveMountedFists(std::uintptr_t manager, std::uintptr_t requested)
@@ -328,8 +426,12 @@ namespace
 
     bool ReplaceTimedSelectionCall(std::uint8_t* site, const std::uint8_t* expected, const std::uint8_t* replacement)
     {
+        if ((reinterpret_cast<std::uintptr_t>(site + 2) % alignof(LONG)) != 0 ||
+            expected[0] != replacement[0] || expected[1] != replacement[1])
+            return false;
+
         DWORD originalProtection = 0;
-        if (!VirtualProtect(site, sizeof(originalTimedSelectionCall) + 1, PAGE_EXECUTE_READWRITE, &originalProtection))
+        if (!VirtualProtect(site, sizeof(timedSelectionCall.patch) + 1, PAGE_EXECUTE_READWRITE, &originalProtection))
             return false;
 
         constexpr std::uint8_t followingOpcode = 0x48;
@@ -343,70 +445,111 @@ namespace
             InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(site + 2), newWord, oldWord) == oldWord;
         if (owned)
         {
-            FlushInstructionCache(GetCurrentProcess(), site, sizeof(originalTimedSelectionCall));
+            FlushInstructionCache(GetCurrentProcess(), site, sizeof(timedSelectionCall.patch));
         }
         DWORD ignored = 0;
-        VirtualProtect(site, sizeof(originalTimedSelectionCall) + 1, originalProtection, &ignored);
+        VirtualProtect(site, sizeof(timedSelectionCall.patch) + 1, originalProtection, &ignored);
         return owned;
     }
 
-    bool InstallTimedSelectionHook()
+    std::uint8_t* SupportedWeaponSelectionImage()
     {
-        if (timedSelectionCall)
-            return std::memcmp(timedSelectionCall, timedSelectionPatch, sizeof(timedSelectionPatch)) == 0;
-
         auto* image = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(nullptr));
         if (!image)
-            return false;
+            return nullptr;
         const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
         if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0)
-            return false;
+            return nullptr;
         const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(image + dos->e_lfanew);
         if (nt->Signature != IMAGE_NT_SIGNATURE || nt->FileHeader.TimeDateStamp != 0x65EEC92E ||
             nt->OptionalHeader.SizeOfImage != 0x7397600)
-            return false;
+            return nullptr;
 
-        auto* site = image + timedSelectionCallRva;
-        constexpr std::uint8_t expectedSite[] = {
-            0xE8, 0x0D, 0x94, 0x04, 0x00, 0x48, 0x83, 0xC4, 0x40, 0x5B, 0xC3
-        };
-        constexpr std::uint8_t expectedTarget[] = { 0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x08 };
-        if (std::memcmp(site, expectedSite, sizeof(expectedSite)) != 0 ||
-            std::memcmp(image + weaponSelectionRva, expectedTarget, sizeof(expectedTarget)) != 0)
+        return image;
+    }
+
+    template<std::size_t N, typename Callback>
+    bool InstallSelectionCall(SelectionCall& hook, std::uint8_t* site,
+        const std::uint8_t (&expectedSite)[N], Callback callback)
+    {
+        if (hook.site)
+            return std::memcmp(hook.site, hook.patch, sizeof(hook.patch)) == 0;
+        if (std::memcmp(site, expectedSite, sizeof(expectedSite)) != 0)
             return false;
 
         auto* relayPage = AllocateTimedSelectionRelay(reinterpret_cast<std::uintptr_t>(site));
         if (!relayPage)
             return false;
-        auto* relay = relayPage + 0x40;
+        const auto originalTargetLow = (reinterpret_cast<std::uintptr_t>(site + sizeof(hook.patch)) +
+            expectedSite[1]) & 0xFF;
+        auto* relay = relayPage + originalTargetLow;
 
-        constexpr std::uint8_t indirectJump[] = { 0xFF, 0x25, 0, 0, 0, 0 };
-        const auto target = reinterpret_cast<std::uintptr_t>(&OnTimedWeaponSelection);
-        std::memcpy(relay, indirectJump, sizeof(indirectJump));
-        std::memcpy(relay + sizeof(indirectJump), &target, sizeof(target));
+        constexpr std::size_t indirectJumpSize = 6;
+        const auto target = reinterpret_cast<std::uintptr_t>(callback);
+        std::uint8_t relayCode[indirectJumpSize + sizeof(target)] = { 0xFF, 0x25 };
+        std::memcpy(relayCode + indirectJumpSize, &target, sizeof(target));
+        std::memcpy(relay, relayCode, sizeof(relayCode));
+
         DWORD ignored = 0;
-        if (!VirtualProtect(relay, sizeof(indirectJump) + sizeof(target), PAGE_EXECUTE_READ, &ignored))
+        if (!VirtualProtect(relay, sizeof(relayCode), PAGE_EXECUTE_READ, &ignored))
         {
             VirtualFree(relayPage, 0, MEM_RELEASE);
             return false;
         }
-        FlushInstructionCache(GetCurrentProcess(), relay, sizeof(indirectJump) + sizeof(target));
+        FlushInstructionCache(GetCurrentProcess(), relay, sizeof(relayCode));
 
-        originalWeaponSelection = reinterpret_cast<WeaponSelection>(image + weaponSelectionRva);
         const auto displacement = static_cast<std::int32_t>(reinterpret_cast<std::intptr_t>(relay) -
-            reinterpret_cast<std::intptr_t>(site + sizeof(originalTimedSelectionCall)));
-        timedSelectionPatch[0] = 0xE8;
-        std::memcpy(timedSelectionPatch + 1, &displacement, sizeof(displacement));
-        if (timedSelectionPatch[1] != originalTimedSelectionCall[1] ||
-            !ReplaceTimedSelectionCall(site, originalTimedSelectionCall, timedSelectionPatch))
+            reinterpret_cast<std::intptr_t>(site + sizeof(hook.patch)));
+        hook.patch[0] = 0xE8;
+        std::memcpy(hook.patch + 1, &displacement, sizeof(displacement));
+        if (hook.patch[1] != expectedSite[1] ||
+            !ReplaceTimedSelectionCall(site, expectedSite, hook.patch))
         {
             VirtualFree(relayPage, 0, MEM_RELEASE);
             return false;
         }
-        timedSelectionCall = site;
+        hook.site = site;
         return true;
     }
 
+
+    void InstallMountedWeaponHooks()
+    {
+        auto* image = SupportedWeaponSelectionImage();
+        if (!image)
+        {
+            Logger::Log("[WARN] Horse: mounted weapon hooks unavailable for this executable.");
+            return;
+        }
+
+        constexpr std::uint8_t selectionEntry[] = { 0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x08 };
+        const auto selection = image + 0x114C140;
+        if (std::memcmp(selection, selectionEntry, sizeof(selectionEntry)) == 0)
+        {
+            if (!originalWeaponSelection)
+                originalWeaponSelection = reinterpret_cast<WeaponSelection>(selection);
+            if (InstallSelectionCall(timedSelectionCall, image + 0x1102D2E, timedSelectionBytes,
+                &OnTimedWeaponSelection))
+                Logger::Log("[SUCCESS] Horse: timed stow hook enabled.");
+        }
+
+        constexpr std::uint8_t fistsEntry[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x30 };
+        constexpr std::uint8_t managerEntry[] = { 0x8B, 0x81, 0x9C, 0, 0, 0, 0x25, 0xFF, 0xFF, 0x01, 0 };
+        const auto fists = image + 0x114D078;
+        const auto manager = image + 0xCC8C58;
+        if (std::memcmp(fists, fistsEntry, sizeof(fistsEntry)) == 0 &&
+            std::memcmp(manager, managerEntry, sizeof(managerEntry)) == 0)
+        {
+            if (!originalFistsSelection)
+                originalFistsSelection = reinterpret_cast<FistsSelection>(fists);
+            getWeaponManager = reinterpret_cast<GetWeaponManager>(manager);
+            if (InstallSelectionCall(queuedFistsCall, image + 0x110278E, queuedFistsBytes,
+                &OnQueuedFistsSelection))
+                Logger::Log("[SUCCESS] Horse: queued return-to-Fists hook enabled.");
+        }
+        if (!timedSelectionCall.site || !queuedFistsCall.site)
+            Logger::Log("[WARN] Horse: one or more mounted weapon hooks could not be installed.");
+    }
 
     void UpdateWeaponTracking(std::uint64_t ped, ULONGLONG now, bool onMount)
     {
@@ -430,6 +573,9 @@ namespace
             nextWeaponSample = now + horseWeaponSampleMs;
             return;
         }
+
+        if (onMount)
+            UpdateMountedCarrySnapshot();
 
         const bool wheelActive = WeaponWheelActive();
         if (wheelActive)
@@ -1155,12 +1301,7 @@ namespace Main::Horse
         if (disableAutoEquip || disableAutoHolster)
             Logger::Log("[INFO] Horse: weapon settings loaded.");
         if (disableAutoHolster)
-        {
-            if (InstallTimedSelectionHook())
-                Logger::Log("[SUCCESS] Horse: timed stow hook enabled.");
-            else
-                Logger::Log("[WARN] Horse: timed stow hook unavailable for this executable.");
-        }
+            InstallMountedWeaponHooks();
         if (disableAutoJump)
             Logger::Log("[INFO] DisableHorseAutoJump: enabled.");
         if (disableWhistleDistance)
@@ -1206,7 +1347,7 @@ namespace Main::Horse
         nativeInit(isPedOnMount);
         nativePush64(ped);
         const bool onMount = static_cast<std::uint32_t>(*nativeCall()) != 0;
-        const auto playerAddress = disableAutoHolster && onMount && timedSelectionCall ?
+        const auto playerAddress = disableAutoHolster && onMount && (timedSelectionCall.site || queuedFistsCall.site) ?
             reinterpret_cast<std::uintptr_t>(getScriptHandleBaseAddress(static_cast<int>(ped))) : 0;
         mountedPlayerAddress.store(playerAddress, std::memory_order_release);
         const ULONGLONG now = GetTickCount64();
@@ -1286,8 +1427,10 @@ namespace Main::Horse
     void Shutdown()
     {
         mountedPlayerAddress.store(0, std::memory_order_release);
-        if (timedSelectionCall)
-            ReplaceTimedSelectionCall(timedSelectionCall, timedSelectionPatch, originalTimedSelectionCall);
+        if (timedSelectionCall.site)
+            ReplaceTimedSelectionCall(timedSelectionCall.site, timedSelectionCall.patch, timedSelectionBytes);
+        if (queuedFistsCall.site)
+            ReplaceTimedSelectionCall(queuedFistsCall.site, queuedFistsCall.patch, queuedFistsBytes);
     }
 
     bool NeedsAutoJumpFrameUpdate()

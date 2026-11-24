@@ -184,13 +184,194 @@ namespace
 
     constexpr std::uint64_t animpostfxIsRunning = 0x4A123E85D7C4CA0BULL;
     constexpr std::uint64_t animpostfxSetStrength = 0xCAB4DD2D5B2B7246ULL;
-    constexpr const char* drunkFilters[] = {
-        "PlayerDrunk01",
-        "PlayerDrunkSaloon1",
-        "PlayerDrunkAberdeen",
-        "PlayerWakeUpDrunk",
-        "PlayerWakeUpAberdeen"
+    // RDR2 1.0.1491.50 animpostfx.ymt metadata. Each effect has six inline layer records.
+    constexpr std::uintptr_t animPostFxTableRva = 0x45915A0;
+    constexpr std::size_t animPostFxRecordSize = 0x1420;
+    constexpr std::size_t animPostFxLayerSize = 0x330;
+    constexpr std::size_t animPostFxDisabledOffset = 0x10;
+    constexpr std::size_t animPostFxLayerCount = 6;
+
+    struct AnimPostFxTable
+    {
+        std::uintptr_t records;
+        std::uint16_t count;
+        std::uint16_t capacity;
     };
+
+    struct AnimPostFxRecord
+    {
+        std::uint32_t hash;
+        std::size_t index;
+        std::uint8_t changedLayers = 0;
+    };
+
+    AnimPostFxRecord drunkFilterRecords[] = {
+        { 0xD2A91C85, 6 },   // PlayerDrunk01
+        { 0x4184DCA3, 52 },  // PlayerWakeUpDrunk
+        { 0xACF375A8, 211 }, // PlayerDrunkAberdeen
+        { 0x837C36D1, 212 }, // PlayerWakeUpAberdeen
+        { 0x700F2B37, 216 }  // PlayerDrunkSaloon1
+    };
+
+    AnimPostFxRecord pauseMenuFilterRecords[] = {
+        { 0x44DABE22, 0 } // PauseMenuIn
+    };
+
+    struct AnimPostFxPatch
+    {
+        const char* name;
+        const char* successMessage;
+        std::uint8_t layers;
+        bool disabled = false;
+        std::uintptr_t patchedTable = 0;
+        bool patchReported = false;
+        bool unavailableReported = false;
+        ULONGLONG nextCheck = 0;
+    };
+
+    AnimPostFxPatch drunkFilterPatch{
+        "DisableDrunkFilter", "five drunk animpostfx records patched.", 0x3F
+    };
+    // Both reference archives disable only the first and last PauseMenuIn layers.
+    AnimPostFxPatch pauseMenuFilterPatch{
+        "DisablePauseMenuFilter", "PauseMenuIn animpostfx layers patched.", 0x21
+    };
+
+    bool ReadAnimPostFxTable(AnimPostFxTable& table)
+    {
+        const auto image = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+        const auto* address = reinterpret_cast<const void*>(image + animPostFxTableRva);
+        return ReadCameraMemory(address, &table, sizeof(table)) && table.records &&
+            table.count != 0 &&
+            table.count <= table.capacity && table.capacity <= 1024;
+    }
+
+    bool ReadAnimPostFxRecord(std::uintptr_t table, const AnimPostFxRecord& record,
+        std::uint8_t (&data)[animPostFxRecordSize])
+    {
+        const auto address = table + record.index * animPostFxRecordSize;
+        std::uint32_t hash = 0;
+        if (!ReadCameraMemory(reinterpret_cast<const void*>(address), data, sizeof(data)))
+            return false;
+        std::memcpy(&hash, data, sizeof(hash));
+        if (hash != record.hash)
+            return false;
+        for (std::size_t layer = 0; layer < animPostFxLayerCount; ++layer)
+        {
+            if (data[animPostFxDisabledOffset + layer * animPostFxLayerSize] > 1)
+                return false;
+        }
+        return true;
+    }
+
+    bool SetAnimPostFxLayers(std::uintptr_t table, AnimPostFxRecord& record, std::uint8_t layers, bool disable)
+    {
+        std::uint8_t data[animPostFxRecordSize];
+        if (!ReadAnimPostFxRecord(table, record, data))
+            return false;
+
+        bool complete = true;
+        for (std::size_t layer = 0; layer < animPostFxLayerCount; ++layer)
+        {
+            const auto mask = static_cast<std::uint8_t>(1U << layer);
+            if (!(layers & mask) || (!disable && !(record.changedLayers & mask)))
+                continue;
+            const auto offset = animPostFxDisabledOffset + layer * animPostFxLayerSize;
+            const auto current = data[offset];
+            const std::uint8_t desired = disable ? 1 : 0;
+            if (current != desired &&
+                !WriteCameraMemory(reinterpret_cast<void*>(table + record.index * animPostFxRecordSize + offset),
+                    &desired, sizeof(desired)))
+            {
+                complete = false;
+                continue;
+            }
+            if (!disable)
+                record.changedLayers &= static_cast<std::uint8_t>(~mask);
+            else if (current != desired)
+                record.changedLayers |= mask;
+        }
+        return complete;
+    }
+
+    template <std::size_t Count>
+    void UpdateAnimPostFxPatch(AnimPostFxPatch& patch, AnimPostFxRecord (&records)[Count])
+    {
+        if (!patch.disabled && !patch.patchedTable)
+            return;
+        const auto now = GetTickCount64();
+        if (now < patch.nextCheck)
+            return;
+        patch.nextCheck = now + 1000;
+
+        AnimPostFxTable table{};
+        if (!ReadAnimPostFxTable(table))
+        {
+            if (!patch.unavailableReported)
+                Logger::Log((std::string("[WARNING] ") + patch.name + ": animpostfx table unavailable; will retry.").c_str());
+            patch.unavailableReported = true;
+            return;
+        }
+
+        if (table.records != patch.patchedTable)
+        {
+            for (auto& record : records)
+                record.changedLayers = 0;
+            patch.patchedTable = 0;
+            patch.patchReported = false;
+            if (!patch.disabled)
+                return;
+
+            // Validate record identities and layer flags before writing to the table.
+            for (const auto& record : records)
+            {
+                std::uint8_t data[animPostFxRecordSize];
+                if (record.index >= table.count || !ReadAnimPostFxRecord(table.records, record, data))
+                {
+                    if (!patch.unavailableReported)
+                        Logger::Log((std::string("[WARNING] ") + patch.name + ": animpostfx record layout did not match.").c_str());
+                    patch.unavailableReported = true;
+                    return;
+                }
+            }
+            patch.patchedTable = table.records;
+        }
+
+        bool complete = true;
+        for (auto& record : records)
+            complete = (record.index < table.count &&
+                SetAnimPostFxLayers(table.records, record, patch.layers, patch.disabled)) && complete;
+        if (!complete)
+        {
+            if (!patch.unavailableReported)
+                Logger::Log((std::string("[WARNING] ") + patch.name + ": animpostfx layer update incomplete; will retry.").c_str());
+            patch.unavailableReported = true;
+            return;
+        }
+
+        patch.unavailableReported = false;
+        if (!patch.disabled)
+        {
+            patch.patchedTable = 0;
+            patch.patchReported = false;
+            Logger::Log((std::string("[INFO] ") + patch.name + ": original animpostfx layer flags restored.").c_str());
+        }
+        else if (!patch.patchReported)
+        {
+            patch.patchReported = true;
+            Logger::Log((std::string("[SUCCESS] ") + patch.name + ": " + patch.successMessage).c_str());
+        }
+    }
+
+    template <std::size_t Count>
+    void SetAnimPostFxDisabled(AnimPostFxPatch& patch, AnimPostFxRecord (&records)[Count], bool disable)
+    {
+        patch.disabled = disable;
+        patch.nextCheck = 0;
+        UpdateAnimPostFxPatch(patch, records);
+    }
+
+
     constexpr const char* eagleEyeFilter = "EagleEye";
     constexpr const char* deadEyeFilter = "DEADEYE";
     constexpr const char* weaponWheelFilter = "WheelHUDIn";
@@ -222,12 +403,10 @@ namespace
     constexpr ULONGLONG manualCameraAllowanceMs = 3000;
 
     bool enabled = false;
-    bool drunkFilterDisabled = false;
     bool eagleEyeFilterDisabled = false;
     bool deadEyeFilterDisabled = false;
     bool weaponWheelFilterDisabled = false;
     bool lowHealthFilterDisabled = false;
-    bool drunkFilterStatusReported = false;
     bool eagleEyeFilterStatusReported = false;
     bool deadEyeFilterStatusReported = false;
     bool weaponWheelFilterStatusReported = false;
@@ -577,19 +756,40 @@ namespace
     bool InvokeBoolean(std::uint64_t hash)
     {
         nativeInit(hash);
-        return *nativeCall() != 0;
+        return static_cast<std::uint32_t>(*nativeCall()) != 0;
+    }
+
+    bool ReadFocusNative(std::uint64_t hash, std::uint32_t& value)
+    {
+        nativeInit(hash);
+        const auto* result = nativeCall();
+        if (!result)
+            return false;
+
+        // These BOOL and Ped natives return 32 bits. ScriptHook V2 can leave the upper slot bits set.
+        value = static_cast<std::uint32_t>(*result);
+        return true;
     }
 
     void UpdateWindowFocusReadiness()
     {
+        std::uint32_t loading = 0;
+        std::uint32_t ped = 0;
         if ((!fullscreenTabOutEnabled && !minimizeOnTabOutEnabled) ||
-            InvokeBoolean(isLoadingScreenActive) || !InvokeBoolean(playerPedId))
+            !ReadFocusNative(isLoadingScreenActive, loading) || loading != 0 ||
+            !ReadFocusNative(playerPedId, ped) || ped == 0)
         {
             windowFocusReady = false;
             return;
         }
-        if (!windowFocusReady && InvokeBoolean(isScreenFadedIn))
+
+        std::uint32_t fadedIn = 0;
+        if (!windowFocusReady && ReadFocusNative(isScreenFadedIn, fadedIn) && fadedIn != 0)
+        {
             windowFocusReady = true;
+            if (Logger::IsDebugEnabled())
+                Logger::Log("[DEBUG] Tab-out monitor: armed after Story Mode became visible.");
+        }
     }
 
     bool SuppressPostFx(const char* effect, bool observe)
@@ -603,7 +803,7 @@ namespace
             return false;
         nativeInit(animpostfxIsRunning);
         nativePush64(reinterpret_cast<std::uint64_t>(effect));
-        return *nativeCall() != 0;
+        return static_cast<std::uint32_t>(*nativeCall()) != 0;
     }
 
     bool ControlPressed(std::uint32_t control)
@@ -611,7 +811,7 @@ namespace
         nativeInit(isControlPressed);
         nativePush64(0);
         nativePush64(control);
-        return *nativeCall() != 0;
+        return static_cast<std::uint32_t>(*nativeCall()) != 0;
     }
 
     void Invoke(std::uint64_t hash)
@@ -627,13 +827,13 @@ namespace
 
         nativeInit(isPedOnMount);
         nativePush64(ped);
-        const bool mounted = *nativeCall() != 0;
+        const bool mounted = static_cast<std::uint32_t>(*nativeCall()) != 0;
         std::uint64_t entity = ped;
         if (mounted)
         {
             nativeInit(getMount);
             nativePush64(ped);
-            const std::uint64_t mount = *nativeCall();
+            const auto mount = static_cast<std::uint32_t>(*nativeCall());
             if (mount != 0)
                 entity = mount;
         }
@@ -641,7 +841,7 @@ namespace
         {
             nativeInit(isPedOnFoot);
             nativePush64(ped);
-            if (*nativeCall() == 0)
+            if (static_cast<std::uint32_t>(*nativeCall()) == 0)
                 return false;
         }
 
@@ -697,7 +897,7 @@ namespace Main::Camera
     }
 
     void Initialize(bool active, bool fixFullscreenTabOut, bool minimizeOnTabOut, bool disableCameraSmoothing, bool disableHeadBob, bool reduceCameraShake, bool reduceCameraSway,
-        bool disableDrunkFilter, bool disableEagleEyeFilter, bool disableDeadEyeFilter,
+        bool disableDrunkFilter, bool disablePauseMenuFilter, bool disableEagleEyeFilter, bool disableDeadEyeFilter,
         bool disableWeaponWheelFilter, bool disableLowHealthFilter)
     {
         enabled = active;
@@ -711,12 +911,12 @@ namespace Main::Camera
                 std::vector<std::uintptr_t>().swap(smoothingScanBuffer);
             }
         }
-        drunkFilterDisabled = disableDrunkFilter;
+        SetAnimPostFxDisabled(drunkFilterPatch, drunkFilterRecords, disableDrunkFilter);
+        SetAnimPostFxDisabled(pauseMenuFilterPatch, pauseMenuFilterRecords, disablePauseMenuFilter);
         eagleEyeFilterDisabled = disableEagleEyeFilter;
         deadEyeFilterDisabled = disableDeadEyeFilter;
         weaponWheelFilterDisabled = disableWeaponWheelFilter;
         lowHealthFilterDisabled = disableLowHealthFilter;
-        drunkFilterStatusReported = false;
         eagleEyeFilterStatusReported = false;
         deadEyeFilterStatusReported = false;
         weaponWheelFilterStatusReported = false;
@@ -737,8 +937,6 @@ namespace Main::Camera
         InitializeWindowFocus(fixFullscreenTabOut, minimizeOnTabOut);
         if (enabled)
             Logger::Log("[INFO] DisableIdleCamera: enabled.");
-        if (drunkFilterDisabled)
-            Logger::Log("[INFO] DisableDrunkFilter: drunk screen effect disabled.");
         if (eagleEyeFilterDisabled)
             Logger::Log("[INFO] DisableEagleEyeFilter: Eagle Eye screen effect disabled.");
         if (deadEyeFilterDisabled)
@@ -765,6 +963,8 @@ namespace Main::Camera
     void Shutdown()
     {
         RestoreCameraSmoothing();
+        SetAnimPostFxDisabled(drunkFilterPatch, drunkFilterRecords, false);
+        SetAnimPostFxDisabled(pauseMenuFilterPatch, pauseMenuFilterRecords, false);
         if (focusMonitorStop)
             SetEvent(focusMonitorStop);
     }
@@ -773,6 +973,8 @@ namespace Main::Camera
     {
         UpdateWindowFocusReadiness();
         UpdateCameraSmoothing();
+        UpdateAnimPostFxPatch(drunkFilterPatch, drunkFilterRecords);
+        UpdateAnimPostFxPatch(pauseMenuFilterPatch, pauseMenuFilterRecords);
         if (!focusMonitorStarted)
             UpdateWindowFocus();
         if (windowFocusReady && fullscreenTabOutEnabled && fullscreenRestorePending && !fullscreenGameFocused)
@@ -792,22 +994,9 @@ namespace Main::Camera
         }
         const bool cameraFeaturesEnabled = enabled || headBobReductionEnabled || shakeReductionEnabled ||
             swayReductionEnabled;
-        if (!cameraFeaturesEnabled && !drunkFilterDisabled && !eagleEyeFilterDisabled && !deadEyeFilterDisabled &&
+        if (!cameraFeaturesEnabled && !eagleEyeFilterDisabled && !deadEyeFilterDisabled &&
             !weaponWheelFilterDisabled && !lowHealthFilterDisabled)
             return;
-
-        if (drunkFilterDisabled)
-        {
-            bool suppressed = false;
-            const bool observe = !drunkFilterStatusReported && Logger::IsDebugEnabled();
-            for (const char* effect : drunkFilters)
-                suppressed = SuppressPostFx(effect, observe) || suppressed;
-            if (suppressed && !drunkFilterStatusReported)
-            {
-                drunkFilterStatusReported = true;
-                Logger::Log("[DEBUG] DisableDrunkFilter: active drunk post-effect was suppressed without clearing playback.");
-            }
-        }
 
         if (eagleEyeFilterDisabled && SuppressPostFx(eagleEyeFilter,
             !eagleEyeFilterStatusReported && Logger::IsDebugEnabled()) && !eagleEyeFilterStatusReported)
@@ -848,7 +1037,7 @@ namespace Main::Camera
 
         nativeInit(isPlayerControlOn);
         nativePush64(0);
-        const bool gameplayCameraActive = *nativeCall() != 0 && InvokeBoolean(isGameplayCamRendering);
+        const bool gameplayCameraActive = static_cast<std::uint32_t>(*nativeCall()) != 0 && InvokeBoolean(isGameplayCamRendering);
 
         if (enabled)
         {
@@ -940,7 +1129,7 @@ namespace Main::Camera
         if (headBobReductionEnabled)
         {
             nativeInit(playerPedId);
-            const std::uint64_t ped = *nativeCall();
+            const auto ped = static_cast<std::uint32_t>(*nativeCall());
             const bool shouldSuppress = PedMovingOnFootOrMount(ped);
             if (shouldSuppress)
             {

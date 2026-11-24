@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
-#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 
 namespace
 {
@@ -22,7 +24,22 @@ namespace
         2048ULL * 1024 * 1024
     };
 
-    std::atomic<bool> workerStarted{ false };
+    constexpr std::uint32_t disabledEntryState = 0x00010000;
+    std::mutex patchMutex;
+    std::condition_variable workerWake;
+    bool workerStarted = false;
+    bool startupDelayPending = false;
+    bool disableRequested = false;
+
+    struct AmmoDataset
+    {
+        std::uintptr_t address = 0;
+        std::uintptr_t imageStart = 0;
+        std::uintptr_t imageEnd = 0;
+        bool patched = false;
+    };
+
+    AmmoDataset ammoDataset;
 
     bool IsWritablePage(DWORD protection)
     {
@@ -56,26 +73,29 @@ namespace
         return size <= information.RegionSize - (address - start);
     }
 
-    bool DisableAmmoEntries(std::uintptr_t address)
+    bool ChangeAmmoEntries(std::uintptr_t address, LONG expected, LONG desired)
     {
-        auto* count = reinterpret_cast<volatile SHORT*>(address);
+        auto* count = reinterpret_cast<volatile LONG*>(address);
 #if defined(_MSC_VER)
         __try
         {
-            return InterlockedCompareExchange16(count, 0, 1) == 1;
+            return InterlockedCompareExchange(count, desired, expected) == expected;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return false;
         }
 #else
-        return InterlockedCompareExchange16(count, 0, 1) == 1;
+        return InterlockedCompareExchange(count, desired, expected) == expected;
 #endif
     }
 
-    bool PatchDataset(std::uintptr_t address, std::uintptr_t imageStart, std::uintptr_t imageEnd)
+    bool ReadDatasetState(const AmmoDataset& target, std::uint32_t& entryState)
     {
-        if (!IsWritableObject(address, 0x20))
+        const auto address = target.address;
+        const auto imageStart = target.imageStart;
+        const auto imageEnd = target.imageEnd;
+        if ((address & 3) != 0 || !IsWritableObject(address, 0x20))
             return false;
 
         std::uint8_t dataset[0x20] = {};
@@ -85,13 +105,12 @@ namespace
         std::uint32_t name = 0;
         std::uintptr_t datasetVtable = 0;
         std::uintptr_t actionAddress = 0;
-        std::uint32_t entryState = 0;
         std::memcpy(&name, dataset, sizeof(name));
         std::memcpy(&datasetVtable, dataset + 0x08, sizeof(datasetVtable));
         std::memcpy(&actionAddress, dataset + 0x10, sizeof(actionAddress));
         std::memcpy(&entryState, dataset + 0x18, sizeof(entryState));
 
-        if (name != ammoDatasetHash || entryState != originalEntryState ||
+        if (name != ammoDatasetHash ||
             datasetVtable < imageStart || datasetVtable >= imageEnd ||
             !IsWritableObject(actionAddress, 0x10))
             return false;
@@ -109,12 +128,36 @@ namespace
             actionVtable >= imageEnd || datasetVtable - actionVtable != 0x10)
             return false;
 
-        if (!IsWritableObject(address + 0x18, sizeof(entryState)) ||
-            !ReadBytes(address + 0x18, &entryState, sizeof(entryState)) ||
-            entryState != originalEntryState || !DisableAmmoEntries(address + 0x18))
+        return true;
+    }
+
+    bool ApplyDataset(AmmoDataset& target, bool disable)
+    {
+        std::uint32_t state = 0;
+        if (!ReadDatasetState(target, state) ||
+            (state != originalEntryState && !(target.patched && state == disabledEntryState)))
             return false;
 
-        Logger::Log("[SUCCESS] DisableAutoAmmoPickup: enabled.");
+        const auto desired = disable ? disabledEntryState : originalEntryState;
+        if (state != desired)
+        {
+            if (!ChangeAmmoEntries(target.address + 0x18, state, desired))
+                return false;
+            Logger::Log(disable ? "[SUCCESS] DisableAutoAmmoPickup: enabled." :
+                "[SUCCESS] DisableAutoAmmoPickup: original ammo pickup restored.");
+        }
+
+        target.patched = disable;
+        return true;
+    }
+
+    bool PatchDataset(std::uintptr_t address, std::uintptr_t imageStart, std::uintptr_t imageEnd)
+    {
+        std::lock_guard<std::mutex> lock(patchMutex);
+        AmmoDataset candidate{ address, imageStart, imageEnd };
+        if (!ApplyDataset(candidate, disableRequested))
+            return false;
+        ammoDataset = candidate;
         return true;
     }
 
@@ -200,24 +243,84 @@ namespace
     {
         HMODULE owner = static_cast<HMODULE>(parameter);
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
-        Sleep(static_cast<DWORD>(firstScanDelayMs));
-
-        bool applied = false;
-        for (unsigned int attempt = 0; attempt < sizeof(scanByteLimits) / sizeof(scanByteLimits[0]); ++attempt)
         {
-            if (ScanAndPatch(scanByteLimits[attempt]))
-            {
-                applied = true;
-                break;
-            }
-            if (attempt + 1 < sizeof(scanByteLimits) / sizeof(scanByteLimits[0]))
-                Sleep(static_cast<DWORD>(retryDelayMs));
+            std::unique_lock<std::mutex> lock(patchMutex);
+            if (startupDelayPending)
+                workerWake.wait_for(lock, std::chrono::milliseconds(firstScanDelayMs),
+                    [] { return !startupDelayPending; });
+            startupDelayPending = false;
         }
 
-        if (!applied)
-            Logger::Log("[WARNING] DisableAutoAmmoPickup: ammo dataset not found; game data unchanged.");
+        constexpr auto attemptCount = sizeof(scanByteLimits) / sizeof(scanByteLimits[0]);
+        for (std::size_t attempt = 0; attempt < attemptCount; ++attempt)
+        {
+            {
+                std::lock_guard<std::mutex> lock(patchMutex);
+                if (!disableRequested)
+                {
+                    workerStarted = false;
+                    break;
+                }
+            }
+
+            const bool found = ScanAndPatch(scanByteLimits[attempt]);
+            std::unique_lock<std::mutex> lock(patchMutex);
+            if (found || !disableRequested || attempt + 1 == attemptCount)
+            {
+                workerStarted = false;
+                if (!found && disableRequested)
+                    Logger::Log("[WARNING] DisableAutoAmmoPickup: ammo dataset not found; game data unchanged.");
+                break;
+            }
+            workerWake.wait_for(lock, std::chrono::milliseconds(retryDelayMs),
+                [] { return !disableRequested; });
+        }
         FreeLibraryAndExitThread(owner, 0);
         return 0;
+    }
+
+    void SetAmmoPickupDisabled(bool disable, bool early)
+    {
+        std::lock_guard<std::mutex> lock(patchMutex);
+        disableRequested = disable;
+        if (!early)
+        {
+            startupDelayPending = false;
+            workerWake.notify_one();
+        }
+
+        if (ammoDataset.address && (disable || ammoDataset.patched))
+        {
+            if (ApplyDataset(ammoDataset, disable))
+                return;
+            if (!disable)
+            {
+                Logger::Log("[WARNING] DisableAutoAmmoPickup: could not verify or restore the patched ammo dataset.");
+                return;
+            }
+        }
+
+        if (!disable || workerStarted)
+            return;
+
+        HMODULE owner = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            reinterpret_cast<LPCWSTR>(&PatchWorker), &owner))
+        {
+            Logger::Log("[WARNING] DisableAutoAmmoPickup: could not retain module for patch worker.");
+            return;
+        }
+
+        startupDelayPending = early;
+        const HANDLE worker = CreateThread(nullptr, 0, PatchWorker, owner, 0, nullptr);
+        if (!worker)
+        {
+            FreeLibrary(owner);
+            Logger::Log("[WARNING] DisableAutoAmmoPickup: could not start patch worker.");
+            return;
+        }
+        workerStarted = true;
+        CloseHandle(worker);
     }
 }
 
@@ -225,26 +328,11 @@ namespace Main::Looting
 {
     void InitializeEarly(bool noAutoAmmoPickup)
     {
-        if (!noAutoAmmoPickup || workerStarted.exchange(true))
-            return;
+        SetAmmoPickupDisabled(noAutoAmmoPickup, true);
+    }
 
-        HMODULE owner = nullptr;
-        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-            reinterpret_cast<LPCWSTR>(&PatchWorker), &owner))
-        {
-            workerStarted.store(false);
-            Logger::Log("[WARNING] DisableAutoAmmoPickup: could not retain module for startup worker.");
-            return;
-        }
-
-        const HANDLE worker = CreateThread(nullptr, 0, PatchWorker, owner, 0, nullptr);
-        if (!worker)
-        {
-            FreeLibrary(owner);
-            workerStarted.store(false);
-            Logger::Log("[WARNING] DisableAutoAmmoPickup: could not start patch worker.");
-            return;
-        }
-        CloseHandle(worker);
+    void SetNoAutoAmmoPickup(bool enabled)
+    {
+        SetAmmoPickupDisabled(enabled, false);
     }
 }

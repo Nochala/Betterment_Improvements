@@ -69,6 +69,7 @@ namespace GameplayFixes
         bool fixFullscreenTabOut = false;
         bool minimizeOnTabOut = false;
         bool disableDrunkFilter = false;
+        bool disablePauseMenuFilter = false;
         bool disableEagleEyeFilter = false;
         bool disableDeadEyeFilter = false;
         bool disableWeaponWheelFilter = false;
