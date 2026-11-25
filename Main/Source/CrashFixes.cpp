@@ -1313,12 +1313,105 @@ namespace
         return result;
     }
 
+    using CacheNodeAllocator = void*(__fastcall*)(std::size_t);
+    std::atomic<CacheNodeAllocator> cacheNodeAllocator{nullptr};
+    std::atomic<long long> cacheNodeClockFrequency{0};
+    enum class CacheNodeTimingSource { Pending, Vulkan, Script };
+    std::atomic<CacheNodeTimingSource> cacheNodeTimingSource{CacheNodeTimingSource::Pending};
+    std::atomic<long long> cacheNodeLastSample{0};
+    std::atomic<std::uint64_t> cacheNodeActivity{0};
+
+    struct CacheNodeFrameTotals
+    {
+        std::atomic<std::uint64_t> frames{0};
+        std::atomic<std::uint64_t> allocations{0};
+        std::atomic<std::uint64_t> allocatorTicks{0};
+    };
+
+    CacheNodeFrameTotals cacheNodeNormalFrames;
+    CacheNodeFrameTotals cacheNodeSlowFrames;
+    void InitializeCacheNodeDiagnostics();
+
+    void* __fastcall MeasureCacheNodeAllocation(std::size_t bytes)
+    {
+        const auto allocate = cacheNodeAllocator.load(std::memory_order_acquire);
+        LARGE_INTEGER begin{}, end{};
+        QueryPerformanceCounter(&begin);
+        void* const node = allocate(bytes);
+        QueryPerformanceCounter(&end);
+        const auto elapsed = static_cast<std::uint64_t>(end.QuadPart - begin.QuadPart);
+        cacheNodeActivity.fetch_add((std::uint64_t{1} << 40) + elapsed, std::memory_order_relaxed);
+        return node;
+    }
+
+    void RecordCacheNodeTiming(CacheNodeTimingSource source)
+    {
+        const auto frequency = cacheNodeClockFrequency.load(std::memory_order_acquire);
+        if (!frequency)
+            return;
+
+        auto selected = CacheNodeTimingSource::Pending;
+        cacheNodeTimingSource.compare_exchange_strong(selected, source);
+        if (selected != CacheNodeTimingSource::Pending && selected != source)
+            return;
+
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        const auto previous = cacheNodeLastSample.exchange(now.QuadPart, std::memory_order_relaxed);
+        const auto activity = cacheNodeActivity.exchange(0, std::memory_order_relaxed);
+        const auto elapsed = now.QuadPart - previous;
+        if (!previous || elapsed <= 0 || elapsed >= frequency)
+            return;
+
+        auto& totals = elapsed >= frequency / 40 ? cacheNodeSlowFrames : cacheNodeNormalFrames;
+        totals.frames.fetch_add(1, std::memory_order_relaxed);
+        totals.allocations.fetch_add(activity >> 40, std::memory_order_relaxed);
+        totals.allocatorTicks.fetch_add(activity & ((std::uint64_t{1} << 40) - 1), std::memory_order_relaxed);
+    }
+
+    void ReportCacheNodeDiagnostics()
+    {
+        const auto frequency = cacheNodeClockFrequency.load(std::memory_order_acquire);
+        if (!frequency)
+            return;
+
+        static const ULONGLONG firstHeartbeat = GetTickCount64();
+        static ULONGLONG nextReport = firstHeartbeat + 10000;
+        const auto now = GetTickCount64();
+        if (now - firstHeartbeat >= 2000 &&
+            cacheNodeTimingSource.load() != CacheNodeTimingSource::Vulkan)
+            RecordCacheNodeTiming(CacheNodeTimingSource::Script);
+        if (now < nextReport)
+            return;
+        nextReport = now + 10000;
+
+        const auto normalFrames = cacheNodeNormalFrames.frames.exchange(0);
+        const auto slowFrames = cacheNodeSlowFrames.frames.exchange(0);
+        if (!normalFrames && !slowFrames)
+            return;
+
+        char message[256]{};
+        std::snprintf(message, sizeof(message),
+            "SmallTextureCache: %s intervals <25ms samples=%llu allocations=%llu allocator_us=%.2f; "
+            "25-999ms samples=%llu allocations=%llu allocator_us=%.2f.",
+            cacheNodeTimingSource.load() == CacheNodeTimingSource::Vulkan ? "Vulkan present" : "script update",
+            static_cast<unsigned long long>(normalFrames),
+            static_cast<unsigned long long>(cacheNodeNormalFrames.allocations.exchange(0)),
+            cacheNodeNormalFrames.allocatorTicks.exchange(0) * 1000000.0 / frequency,
+            static_cast<unsigned long long>(slowFrames),
+            static_cast<unsigned long long>(cacheNodeSlowFrames.allocations.exchange(0)),
+            cacheNodeSlowFrames.allocatorTicks.exchange(0) * 1000000.0 / frequency);
+        Logger::Debug(message);
+    }
+
     std::int32_t WINAPI GFXInterceptVkQueuePresent(void* queue, const void* info)
     {
         const auto original = gfxOriginalVkQueuePresent.load();
         if (!original)
             return -3;
         const std::int32_t result = original(queue, info);
+        if (result == 0 || result == 1000001003)
+            RecordCacheNodeTiming(CacheNodeTimingSource::Vulkan);
         if (result < 0 && result != -1000001004)
             GFXReportAPIResult("vkQueuePresentKHR", result);
         return result;
@@ -1790,6 +1883,8 @@ namespace Main::CrashFixes
         }
         GFXConfigureDRED();
         const unsigned int imports = GFXInstallImportHooks();
+        if (imports && Logger::IsDebugEnabled())
+            InitializeCacheNodeDiagnostics();
         char hookStatus[180] = {};
         std::snprintf(hookStatus, sizeof(hookStatus), "[HOOK_STATUS] RDR2.exe import hooks installed=%u/5\r\n", imports);
         WriteGFXTrace(hookStatus);
@@ -1839,6 +1934,7 @@ namespace Main::CrashFixes
 
     void RecordCrashDiagnosticsHeartbeat()
     {
+        ReportCacheNodeDiagnostics();
         if (InterlockedCompareExchange(&gfxWatchdogEnabled, 0, 0) == 0)
             return;
         InterlockedExchange(&gfxScriptThread, static_cast<LONG>(GetCurrentThreadId()));
@@ -2852,6 +2948,76 @@ namespace
         return flushed && verified && restoredProtection;
     }
 
+    void InitializeCacheNodeDiagnostics()
+    {
+        constexpr std::uintptr_t callRva = 0x26E023F;
+        constexpr std::uintptr_t allocatorRva = 0x136720;
+        constexpr std::uint8_t allocation[] = { 0xB9, 0x30, 0, 0, 0, 0xE8, 0xDC, 0x64, 0xA5, 0xFD };
+        const auto* image = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
+        const IMAGE_NT_HEADERS64* nt = nullptr;
+        auto* const site = const_cast<std::uint8_t*>(image + callRva);
+        LARGE_INTEGER frequency{};
+        if (!HasValidImage(image, nt) || nt->FileHeader.TimeDateStamp != 0x65EEC92E ||
+            nt->OptionalHeader.SizeOfImage != 0x7397600 ||
+            !IsInExecutableSection(image, nt, site - 5, sizeof(allocation)) ||
+            !IsInExecutableSection(image, nt, image + allocatorRva, 1) ||
+            std::memcmp(site - 5, allocation, sizeof(allocation)) != 0 ||
+            DecodeBranch(site) != image + allocatorRva ||
+            !QueryPerformanceFrequency(&frequency))
+        {
+            Logger::Debug("SmallTextureCache: native allocator callsite validation failed.");
+            return;
+        }
+
+        auto* const relay = AllocatePackfileCallRelay(site);
+        if (!relay)
+        {
+            Logger::Debug("SmallTextureCache: no startup relay available.");
+            return;
+        }
+
+        const auto delta = reinterpret_cast<std::intptr_t>(relay) - reinterpret_cast<std::intptr_t>(site + 5);
+        const auto handler = reinterpret_cast<std::uintptr_t>(&MeasureCacheNodeAllocation);
+        std::uint8_t code[6 + sizeof(handler)] = { 0xFF, 0x25 };
+        std::memcpy(code + 6, &handler, sizeof(handler));
+        std::memcpy(relay, code, sizeof(code));
+        DWORD previous = 0;
+        if (delta < (std::numeric_limits<LONG>::min)() || delta > (std::numeric_limits<LONG>::max)() ||
+            !VirtualProtect(relay, sizeof(code), PAGE_EXECUTE_READ, &previous) ||
+            !FlushInstructionCache(GetCurrentProcess(), relay, sizeof(code)) ||
+            !VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &previous))
+        {
+            VirtualFree(relay, 0, MEM_RELEASE);
+            Logger::Debug("SmallTextureCache: allocator hook preparation failed.");
+            return;
+        }
+
+        constexpr LONG native = static_cast<LONG>(allocatorRva) - static_cast<LONG>(callRva + 5);
+        auto* const operand = reinterpret_cast<volatile LONG*>(site + 1);
+        const auto replacement = static_cast<LONG>(delta);
+        cacheNodeAllocator.store(reinterpret_cast<CacheNodeAllocator>(image + allocatorRva), std::memory_order_release);
+        cacheNodeClockFrequency.store(frequency.QuadPart, std::memory_order_release);
+        const bool written = std::memcmp(site - 5, allocation, sizeof(allocation)) == 0 &&
+            InterlockedCompareExchange(operand, replacement, native) == native;
+        const bool installed = written && FlushInstructionCache(GetCurrentProcess(), site, 5) != FALSE;
+        if (!installed && written)
+        {
+            InterlockedCompareExchange(operand, native, replacement);
+            FlushInstructionCache(GetCurrentProcess(), site, 5);
+        }
+        if (!written)
+        {
+            cacheNodeClockFrequency.store(0, std::memory_order_release);
+            VirtualFree(relay, 0, MEM_RELEASE);
+        }
+
+        DWORD ignored = 0;
+        if (!VirtualProtect(site, 5, previous, &ignored))
+            Logger::Log("[WARNING] SmallTextureCache: allocator callsite protection could not be restored.");
+        Logger::Debug(installed ? "SmallTextureCache: native allocation timing enabled (Vulkan present or script update)." :
+            "SmallTextureCache: allocator hook installation could not be verified.");
+    }
+
     bool RestorePackfileInitializationCall()
     {
         if (!packfileCallAddress)
@@ -3456,6 +3622,190 @@ namespace Main::CrashFixes
         packfileCallAddress = nullptr;
     }
 
+    namespace
+    {
+        constexpr std::uintptr_t writableResourceCallRva = 0x26C2511;
+        constexpr std::uintptr_t writableResourceInitRva = 0x26B9A30;
+        constexpr std::uintptr_t writableResourceTableRva = 0x571B520;
+        constexpr std::uintptr_t writableResourceOwnerRva = 0x57B8890;
+        constexpr std::uintptr_t writableResourceOwnerVtableRva = 0x3401B60;
+        constexpr std::uintptr_t writableResourceDescriptorOffset = 0x30;
+        constexpr std::uint32_t writableResourceMinimum = 50000;
+        constexpr std::size_t writableResourceCountOffset = 0xE8;
+        using WritableResourceInitializer = void(__fastcall*)(const void*);
+        std::atomic<WritableResourceInitializer> writableResourceInitializer{nullptr};
+        std::atomic<std::uint32_t> writableResourceRequested{0};
+
+        struct WritableResourceTable
+        {
+            const void* entries;
+            const void* indices;
+            std::uint16_t capacity;
+        };
+
+        WritableResourceTable ReadWritableResourceTable()
+        {
+            WritableResourceTable table{};
+            const auto* image = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
+            std::memcpy(&table, image + writableResourceTableRva, sizeof(table));
+            return table;
+        }
+
+        void __fastcall InitializeWritableResourceTable(const void* descriptor)
+        {
+            const auto original = writableResourceInitializer.load(std::memory_order_acquire);
+            const auto table = ReadWritableResourceTable();
+            const auto* image = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
+            std::uintptr_t owner = 0;
+            std::memcpy(&owner, image + writableResourceOwnerRva, sizeof(owner));
+            alignas(16) std::uint8_t adjusted[0x108];
+            if (table.capacity || table.entries || table.indices || !owner ||
+                reinterpret_cast<std::uintptr_t>(descriptor) != owner + writableResourceDescriptorOffset ||
+                !CanReadPoolMemory(reinterpret_cast<const void*>(owner), sizeof(void*)) ||
+                !CanReadPoolMemory(descriptor, sizeof(adjusted)))
+            {
+                original(descriptor);
+                return;
+            }
+
+            const void* vtable = nullptr;
+            std::memcpy(&vtable, reinterpret_cast<const void*>(owner), sizeof(vtable));
+            if (vtable != image + writableResourceOwnerVtableRva)
+            {
+                original(descriptor);
+                return;
+            }
+
+            std::uint32_t requested = 0;
+            std::memcpy(&requested, static_cast<const std::uint8_t*>(descriptor) + writableResourceCountOffset,
+                sizeof(requested));
+            if (requested == 0 || requested > 0xFFFF)
+            {
+                original(descriptor);
+                return;
+            }
+
+            writableResourceRequested.store(requested, std::memory_order_release);
+            if (requested >= writableResourceMinimum)
+            {
+                original(descriptor);
+                return;
+            }
+
+            std::memcpy(adjusted, descriptor, sizeof(adjusted));
+            std::memcpy(adjusted + writableResourceCountOffset, &writableResourceMinimum,
+                sizeof(writableResourceMinimum));
+            original(adjusted);
+        }
+    }
+
+    void ExtendWritableResourceSlots(bool enabled)
+    {
+        if (!enabled || writableResourceInitializer.load(std::memory_order_acquire))
+            return;
+
+        const auto* image = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
+        const IMAGE_NT_HEADERS64* nt = nullptr;
+        constexpr std::uint8_t call[] = { 0xE8, 0x1A, 0x75, 0xFF, 0xFF };
+        constexpr std::uint8_t initializer[] = { 0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x40 };
+        if (!HasValidImage(image, nt) || nt->FileHeader.TimeDateStamp != 0x65EEC92E ||
+            nt->OptionalHeader.SizeOfImage != 0x7397600 ||
+            !IsInExecutableSection(image, nt, image + writableResourceCallRva, sizeof(call)) ||
+            !IsInExecutableSection(image, nt, image + writableResourceInitRva, sizeof(initializer)) ||
+            !CanReadPoolMemory(image + writableResourceTableRva, sizeof(WritableResourceTable)) ||
+            !CanReadPoolMemory(image + writableResourceOwnerRva, sizeof(void*)) ||
+            std::memcmp(image + writableResourceCallRva, call, sizeof(call)) != 0 ||
+            std::memcmp(image + writableResourceInitRva, initializer, sizeof(initializer)) != 0)
+        {
+            Logger::Log("[WARNING] ExtendWritableResourceSlots: startup initializer validation failed.");
+            return;
+        }
+
+        const auto table = ReadWritableResourceTable();
+        if (table.capacity || table.entries || table.indices)
+        {
+            Logger::Log("[WARNING] ExtendWritableResourceSlots: table already initialized.");
+            return;
+        }
+
+        auto* site = const_cast<std::uint8_t*>(image + writableResourceCallRva);
+        auto* relay = AllocatePackfileCallRelay(site);
+        if (!relay)
+        {
+            Logger::Log("[WARNING] ExtendWritableResourceSlots: startup relay allocation failed.");
+            return;
+        }
+
+        const auto delta = reinterpret_cast<std::intptr_t>(relay) - reinterpret_cast<std::intptr_t>(site + sizeof(call));
+        const auto handler = reinterpret_cast<std::uintptr_t>(&InitializeWritableResourceTable);
+        std::uint8_t relayCode[6 + sizeof(handler)] = { 0xFF, 0x25 };
+        std::memcpy(relayCode + 6, &handler, sizeof(handler));
+        std::memcpy(relay, relayCode, sizeof(relayCode));
+
+        auto* callWord = site - 1;
+        DWORD previous = 0;
+        if (delta < (std::numeric_limits<std::int32_t>::min)() ||
+            delta > (std::numeric_limits<std::int32_t>::max)() ||
+            !VirtualProtect(relay, sizeof(relayCode), PAGE_EXECUTE_READ, &previous) ||
+            !FlushInstructionCache(GetCurrentProcess(), relay, sizeof(relayCode)) ||
+            !VirtualProtect(callWord, sizeof(LONG64), PAGE_EXECUTE_READWRITE, &previous))
+        {
+            VirtualFree(relay, 0, MEM_RELEASE);
+            Logger::Log("[WARNING] ExtendWritableResourceSlots: startup relay or callsite preparation failed.");
+            return;
+        }
+
+        LONG64 originalWord = 0;
+        std::memcpy(&originalWord, callWord, sizeof(originalWord));
+        LONG64 adjustedWord = originalWord;
+        const auto adjustedDisplacement = static_cast<std::int32_t>(delta);
+        std::memcpy(reinterpret_cast<std::uint8_t*>(&adjustedWord) + 2, &adjustedDisplacement,
+            sizeof(adjustedDisplacement));
+        auto* operand = reinterpret_cast<volatile LONG64*>(callWord);
+        writableResourceInitializer.store(reinterpret_cast<WritableResourceInitializer>(image + writableResourceInitRva),
+            std::memory_order_release);
+        const bool installed = std::memcmp(reinterpret_cast<const std::uint8_t*>(&originalWord) + 1,
+            call, sizeof(call)) == 0 &&
+            InterlockedCompareExchange64(operand, adjustedWord, originalWord) == originalWord;
+        bool flushed = false;
+        if (installed)
+        {
+            flushed = FlushInstructionCache(GetCurrentProcess(), site, sizeof(call)) != FALSE;
+            if (!flushed)
+            {
+                InterlockedCompareExchange64(operand, originalWord, adjustedWord);
+                FlushInstructionCache(GetCurrentProcess(), site, sizeof(call));
+            }
+        }
+        else
+        {
+            writableResourceInitializer.store(nullptr, std::memory_order_release);
+            VirtualFree(relay, 0, MEM_RELEASE);
+        }
+
+        DWORD ignored = 0;
+        if (!VirtualProtect(callWord, sizeof(LONG64), previous, &ignored))
+            Logger::Log("[WARNING] ExtendWritableResourceSlots: callsite protection could not be restored.");
+        Logger::Log(flushed ? "[INFO] ExtendWritableResourceSlots: startup floor of 50000 armed." :
+            "[WARNING] ExtendWritableResourceSlots: startup hook installation could not be verified.");
+    }
+
+    void ReportWritableResourceSlots()
+    {
+        if (!writableResourceInitializer.load(std::memory_order_acquire))
+            return;
+
+        const auto table = ReadWritableResourceTable();
+        const auto requested = writableResourceRequested.load(std::memory_order_acquire);
+        const auto expected = requested < writableResourceMinimum ? writableResourceMinimum : requested;
+        const bool verified = requested && table.capacity == expected && table.entries && table.indices;
+        char message[176] = {};
+        std::snprintf(message, sizeof(message), verified ?
+            "[SUCCESS] ExtendWritableResourceSlots: native capacity verified at %u (requested %u)." :
+            "[WARNING] ExtendWritableResourceSlots: floor unverified; native capacity %u (requested %u).",
+            static_cast<unsigned>(table.capacity), requested);
+        Logger::Log(message);
+    }
     void ExtendStreamingPools(bool enabled, bool extendAssets, bool optimizeStreamingMemory)
     {
         poolStreamingEnabled = enabled;

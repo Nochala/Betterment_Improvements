@@ -7,6 +7,7 @@ namespace Main::Camera
         bool disableDrunkFilter, bool disablePauseMenuFilter, bool disableEagleEyeFilter, bool disableDeadEyeFilter,
         bool disableWeaponWheelFilter, bool disableLowHealthFilter);
     bool NeedsFastUpdate();
+    bool IsRefreshRateCappedByVsync(int fps);
     void Shutdown();
     void Update();
 }

@@ -1083,6 +1083,7 @@ namespace Main
         CrashFixes::InitializeTextureStreamingStutterFix(settings.enabled && settings.textureStreamingStutterFix);
         CrashFixes::InitializeImproveTextureStreaming(settings.enabled && settings.improveTextureStreaming);
         CrashFixes::Initialize(settings.enabled && settings.textureCrashFix);
+        CrashFixes::ExtendWritableResourceSlots(settings.enabled && settings.extendAssetPools);
         CrashFixes::ExtendStreamingPools(settings.enabled && settings.extendStreamingPools,
             settings.enabled && settings.extendAssetPools,
             settings.enabled && settings.optimizeStreamingMemory);
@@ -1102,6 +1103,7 @@ namespace Main
             settings.enabled && settings.disableWantedMusic);
         CrashFixes::RestoreTextureStreamingStutterFix();
         CrashFixes::ReportImproveTextureStreamingStatus();
+        CrashFixes::ReportWritableResourceSlots();
         CrashFixes::ReportPoolExtensionStatus();
         CrashFixes::ReportCrashDiagnosticsStatus();
         SkipIntro::FinishStartup();

@@ -215,18 +215,21 @@ namespace
     bool SaveMenuPreferences()
     {
         if (cachePath.empty())
+        {
+            Logger::FileWriteFailure(L"MenuSettings.cache", "resolve the cache path for writing", ERROR_PATH_NOT_FOUND);
             return false;
+        }
         const std::wstring xValue = std::to_wstring(menuPositionX);
         const std::wstring yValue = std::to_wstring(menuPositionY);
         const std::wstring sizeValue = std::to_wstring(menuSize);
         const std::wstring opacityValue = std::to_wstring(menuOpacity);
         const wchar_t* audioValue = menuAudioEnabled ? L"true" : L"false";
-        return WritePrivateProfileStringW(L"Menu", L"PositionX", xValue.c_str(), cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"PositionY", yValue.c_str(), cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"Size", sizeValue.c_str(), cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"Opacity", opacityValue.c_str(), cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"MenuAudio", audioValue, cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"Orientation", nullptr, cachePath.c_str());
+        return Logger::WriteProfileValue(L"Menu", L"PositionX", xValue.c_str(), cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"PositionY", yValue.c_str(), cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"Size", sizeValue.c_str(), cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"Opacity", opacityValue.c_str(), cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"MenuAudio", audioValue, cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"Orientation", nullptr, cachePath.c_str());
     }
 
     void LoadMenuPreferences()
@@ -345,13 +348,6 @@ namespace
                     result.maxValue = 3.0f;
                     result.increment = 0.25f;
                 }
-                else if (Same(key, L"RecoilShakeAmplitudeScale") || Same(key, L"FirstPersonRecoilShakeAmplitudeScale"))
-                {
-                    result.type = ValueType::Number;
-                    result.minValue = 0.0f;
-                    result.maxValue = 1.0f;
-                    result.increment = 0.05f;
-                }
             }
         }
         return result;
@@ -361,9 +357,7 @@ namespace
     {
         static constexpr const wchar_t* keys[] =
         {
-            L"ExpandSSRCoverage", L"SSROverscanScale", L"SSROverscanTestMode",
-            L"ReduceWeaponRecoil", L"RecoilShakeAmplitudeScale",
-            L"ReduceFirstPersonWeaponRecoil", L"FirstPersonRecoilShakeAmplitudeScale"
+            L"ExpandSSRCoverage", L"SSROverscanScale", L"SSROverscanTestMode"
         };
         for (const wchar_t* experimentalKey : keys)
             if (Same(key, experimentalKey))
@@ -411,7 +405,7 @@ namespace
             { L"Player", L"DisableFirstPersonAutoRun", L"true" },
             { L"Player", L"QuickLootBodies", L"false" },
             { L"Player", L"QuickLootAnimals", L"false" },
-            { L"Weapons", L"DisableEmptyAutoReload", L"false" },
+            { L"Weapons", L"DisableEmptyAutoReload", L"true" },
             { L"Weapons", L"DisableAutoReload", L"true" },
             { L"Weapons", L"DisableDeadEyeAutoReload", L"true" },
             { L"Weapons", L"DisableForcedScope", L"true" },
@@ -432,11 +426,13 @@ namespace
             { L"Visual", L"DisableIdleCamera", L"true" },
             { L"Visual", L"ReduceCameraShake", L"false" },
             { L"Visual", L"ReduceCameraSway", L"false" },
+            { L"Visual", L"DisableCameraSmoothing", L"false" },
             { L"Visual", L"DisableHeadBob", L"false" },
             { L"Visual", L"CameraFOVOffset", L"0.0" },
             { L"Visual", L"DisableInteriorLighting", L"false" },
             { L"Visual", L"DisableDistantLights", L"false" },
             { L"Visual", L"DisableDrunkFilter", L"false" },
+            { L"Visual", L"DisablePauseMenuFilter", L"false" },
             { L"Visual", L"DisableEagleEyeFilter", L"false" },
             { L"Visual", L"DisableDeadEyeFilter", L"false" },
             { L"Visual", L"DisableWeaponWheelFilter", L"false" },
@@ -491,21 +487,23 @@ namespace
             { L"Weapons", L"DisableReticleSway", "AIMING & EFFECTS" },
             { L"Weapons", L"DisableWeaponDegradation", "MAINTENANCE" },
             { L"Visual", L"RemoveBlackBars", "DISPLAY" },
-            { L"Visual", L"DisableVignette", "DISPLAY" },
-            { L"Visual", L"DisableBloom", "DISPLAY" },
-            { L"Visual", L"DisableChromaticAberration", "DISPLAY" },
-            { L"Visual", L"DisableCompositeDithering", "DISPLAY" },
+            { L"Visual", L"DisableVignette", "Graphics" },
+            { L"Visual", L"DisableBloom", "Graphics" },
+            { L"Visual", L"DisableChromaticAberration", "Graphics" },
+            { L"Visual", L"DisableCompositeDithering", "Graphics" },
             { L"Visual", L"EnableDLSSAutoExposure", "DISPLAY" },
             { L"Visual", L"FixFullscreenTabOut", "DISPLAY" },
             { L"Visual", L"MinimizeOnTabOut", "DISPLAY" },
             { L"Visual", L"DisableIdleCamera", "CAMERA" },
             { L"Visual", L"ReduceCameraShake", "CAMERA" },
             { L"Visual", L"ReduceCameraSway", "CAMERA" },
+            { L"Visual", L"DisableCameraSmoothing", "CAMERA" },
             { L"Visual", L"DisableHeadBob", "CAMERA" },
             { L"Visual", L"CameraFOVOffset", "CAMERA" },
             { L"Visual", L"DisableInteriorLighting", "WORLD" },
             { L"Visual", L"DisableDistantLights", "WORLD" },
             { L"Visual", L"DisableDrunkFilter", "FILTERS" },
+            { L"Visual", L"DisablePauseMenuFilter", "FILTERS" },
             { L"Visual", L"DisableEagleEyeFilter", "FILTERS" },
             { L"Visual", L"DisableDeadEyeFilter", "FILTERS" },
             { L"Visual", L"DisableWeaponWheelFilter", "FILTERS" },
@@ -571,6 +569,14 @@ namespace
         }
         for (auto& section : sections)
         {
+            if (Same(section.name, L"Visual"))
+            {
+                std::stable_partition(section.entries.begin(), section.entries.end(), [&](const Entry& entry)
+                {
+                    const char* heading = SubcategoryName(section.name, entry.key);
+                    return heading && std::strcmp(heading, "Graphics") == 0;
+                });
+            }
             section.menuRows.reserve(section.entries.size() + 5);
             section.entryRows.reserve(section.entries.size());
             const char* previousHeading = nullptr;
@@ -686,7 +692,7 @@ namespace
         nativeInit(hasStreamedTextureDictLoaded);
         nativePush64(reinterpret_cast<std::uint64_t>(dictionary));
         const auto result = nativeCall();
-        return result && *result != 0;
+        return result && static_cast<std::uint32_t>(*result) != 0;
     }
 
     void RequestTextureDictionary(const char* dictionary)
@@ -902,7 +908,7 @@ namespace
             if (Same(name, L"Player")) return "Player movement and interaction settings.";
             if (Same(name, L"Horse")) return "Horse behavior and riding options.";
             if (Same(name, L"Gameplay")) return "Gameplay behavior, Honor, and bounty settings.";
-            if (Same(name, L"Weapons")) return "Weapon behavior, recoil, and reticle settings.";
+            if (Same(name, L"Weapons")) return "Weapon behavior and reticle settings.";
             if (Same(name, L"Ambient") || Same(name, L"Ambience")) return "Ambient, combat, and wanted music options.";
             if (Same(name, L"Startup")) return "Startup and loading-screen options.";
             if (Same(name, L"Diagnostics")) return "Diagnostic options used to investigate problems.";
@@ -956,8 +962,9 @@ namespace
             { L"CameraFOVOffset", "Adjusts the camera field-of-view offset." },
             { L"EnableDLSSAutoExposure", "Enables automatic exposure handling for DLSS." },
             { L"DisableInteriorLighting", "Disables interior lighting effects." },
-            { L"DisableDistantLights", "Disables distant light rendering." },
+            { L"DisableDistantLights", "Disables distant light rendering. This causes bloom artifacts." },
             { L"DisableDrunkFilter", "Removes the screen filter used while the player is drunk." },
+            { L"DisablePauseMenuFilter", "Removes the screen filter used by the pause menu." },
             { L"DisableEagleEyeFilter", "Removes the Eagle Eye screen color filter." },
             { L"DisableDeadEyeFilter", "Removes the Dead Eye screen color filter." },
             { L"DisableWeaponWheelFilter", "Removes the filter shown when opening the weapon wheel." },
@@ -965,13 +972,10 @@ namespace
             { L"DisableIdleCamera", "Prevents the automatic idle camera from activating." },
             { L"FixFullscreenTabOut", "Fixes fullscreen behavior when switching out of the game." },
             { L"MinimizeOnTabOut", "Minimizes the game when tabbing out." },
+            { L"DisableCameraSmoothing", "Disables movement-based camera smoothing when looking around in third person." },
             { L"DisableHeadBob", "Removes camera bobbing from movement." },
             { L"ReduceCameraShake", "Reduces shake applied to the gameplay camera." },
             { L"ReduceCameraSway", "Reduces swaying motion applied to the camera." },
-            { L"ReduceWeaponRecoil", "Reduces camera recoil from firing weapons." },
-            { L"RecoilShakeAmplitudeScale", "Controls how strongly weapon recoil shakes the camera." },
-            { L"ReduceFirstPersonWeaponRecoil", "Reduces camera recoil in first-person view." },
-            { L"FirstPersonRecoilShakeAmplitudeScale", "Controls first-person recoil camera shake." },
             { L"DisableFirstPersonAutoRun", "Disables automatic running in first-person view." },
             { L"QuickLootBodies", "Shortens looting interactions with bodies." },
             { L"QuickLootAnimals", "Shortens looting interactions with animals." },
@@ -1459,7 +1463,7 @@ namespace
         bool success = true;
         for (auto it = pendingChanges.begin(); it != pendingChanges.end();)
         {
-            if (WritePrivateProfileStringW(it->first.first.c_str(), it->first.second.c_str(),
+            if (Logger::WriteProfileValue(it->first.first.c_str(), it->first.second.c_str(),
                 it->second.c_str(), configPath.c_str()))
             {
                 Section* target = Same(it->first.first, L"General") ? &generalSection : nullptr;
@@ -1494,7 +1498,7 @@ namespace
                 success = false;
         }
         Logger::Log(success ? "[SUCCESS] Settings menu: saved." :
-            "[ERROR] Settings menu: some options could not be saved.");
+            "[WARNING] Settings menu: some options could not be saved.");
         return success;
     }
 }

@@ -17,6 +17,8 @@ namespace Main::CrashFixes
     void InitializeImproveTextureStreaming(bool enabled);
     void ReportImproveTextureStreamingStatus();
     void ShutdownImproveTextureStreaming();
+    void ExtendWritableResourceSlots(bool enabled);
+    void ReportWritableResourceSlots();
     void ExtendStreamingPools(bool enabled, bool extendAssets, bool optimizeStreamingMemory);
     void ObserveStreamingPoolStartup();
     void ReportPoolExtensionStatus();

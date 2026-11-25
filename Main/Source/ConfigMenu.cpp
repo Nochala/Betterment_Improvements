@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -99,6 +100,12 @@ namespace
     int menuPositionY = 5;
     int menuSize = 100;
     int menuOpacity = 100;
+    constexpr int fpsCounterRow = 4;
+    constexpr int menuAudioRow = fpsCounterRow + 1;
+    constexpr int menuDefaultsRow = menuAudioRow + 1;
+    constexpr std::uint64_t getFrameCount = 0x77DFA958FCF100C1ULL;
+    bool fpsCounterEnabled = false;
+    bool savedFpsCounterEnabled = false;
     bool menuAudioEnabled = true;
     int savedMenuPositionX = 3;
     int savedMenuPositionY = 5;
@@ -201,6 +208,7 @@ namespace
         savedMenuPositionY = menuPositionY;
         savedMenuSize = menuSize;
         savedMenuOpacity = menuOpacity;
+        savedFpsCounterEnabled = fpsCounterEnabled;
         savedMenuAudioEnabled = menuAudioEnabled;
         menuPreferencesDirty = false;
     }
@@ -209,7 +217,7 @@ namespace
     {
         menuPreferencesDirty = menuPositionX != savedMenuPositionX || menuPositionY != savedMenuPositionY ||
             menuSize != savedMenuSize || menuOpacity != savedMenuOpacity ||
-            menuAudioEnabled != savedMenuAudioEnabled;
+            fpsCounterEnabled != savedFpsCounterEnabled || menuAudioEnabled != savedMenuAudioEnabled;
     }
 
     bool SaveMenuPreferences()
@@ -223,11 +231,13 @@ namespace
         const std::wstring yValue = std::to_wstring(menuPositionY);
         const std::wstring sizeValue = std::to_wstring(menuSize);
         const std::wstring opacityValue = std::to_wstring(menuOpacity);
+        const wchar_t* fpsValue = fpsCounterEnabled ? L"true" : L"false";
         const wchar_t* audioValue = menuAudioEnabled ? L"true" : L"false";
         return Logger::WriteProfileValue(L"Menu", L"PositionX", xValue.c_str(), cachePath.c_str()) &&
             Logger::WriteProfileValue(L"Menu", L"PositionY", yValue.c_str(), cachePath.c_str()) &&
             Logger::WriteProfileValue(L"Menu", L"Size", sizeValue.c_str(), cachePath.c_str()) &&
             Logger::WriteProfileValue(L"Menu", L"Opacity", opacityValue.c_str(), cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"FpsCounter", fpsValue, cachePath.c_str()) &&
             Logger::WriteProfileValue(L"Menu", L"MenuAudio", audioValue, cachePath.c_str()) &&
             Logger::WriteProfileValue(L"Menu", L"Orientation", nullptr, cachePath.c_str());
     }
@@ -238,6 +248,7 @@ namespace
         menuPositionY = 5;
         menuSize = 100;
         menuOpacity = 100;
+        fpsCounterEnabled = false;
         menuAudioEnabled = true;
         if (cachePath.empty())
         {
@@ -255,6 +266,9 @@ namespace
         menuPositionY = ReadCacheNumber(L"PositionY", 5, 0, 100);
         menuSize = ReadCacheNumber(L"Size", 100, 70, 130, 10);
         menuOpacity = ReadCacheNumber(L"Opacity", 100, 30, 100, 10);
+        wchar_t fps[16] = {};
+        GetPrivateProfileStringW(L"Menu", L"FpsCounter", L"false", fps, 16, cachePath.c_str());
+        fpsCounterEnabled = Same(fps, L"true") || Same(fps, L"1");
         wchar_t audio[16] = {};
         GetPrivateProfileStringW(L"Menu", L"MenuAudio", L"true", audio, 16, cachePath.c_str());
         menuAudioEnabled = !Same(audio, L"false") && !Same(audio, L"0");
@@ -320,6 +334,13 @@ namespace
             result.type = ValueType::MenuKey;
         else if (Same(key, L"MenuModifier"))
             result.type = ValueType::Modifier;
+        else if (Same(key, L"FramerateLimit"))
+        {
+            result.type = ValueType::Number;
+            result.minValue = 1.0f;
+            result.maxValue = GameplayFixes::maximumFramerateLimit;
+            result.increment = 1.0f;
+        }
         else if (Same(value, L"true") || Same(value, L"false"))
             result.type = ValueType::Boolean;
         else
@@ -372,6 +393,8 @@ namespace
         {
             { L"General", L"Logging", L"true" },
             { L"General", L"DebugLogging", L"true" },
+            { L"General", L"FramerateCap", L"false" },
+            { L"General", L"FramerateLimit", L"60" },
             { L"General", L"Notification", L"true" },
             { L"General", L"MenuKey", L"F8" },
             { L"General", L"MenuModifier", L"none" },
@@ -792,7 +815,7 @@ namespace
         nativeCall();
     }
 
-    void ScreenText(const std::string& text, float x, float y, float scale, int red, int green, int blue, bool titleFont = false)
+    void ScreenText(const std::string& text, float x, float y, float scale, int red, int green, int blue, bool titleFont = false, bool fadeWithMenu = true)
     {
         nativeInit(bgSetTextScale);
         nativePush64(FloatArgument(scale));
@@ -802,9 +825,58 @@ namespace
         nativePush64(red);
         nativePush64(green);
         nativePush64(blue);
-        nativePush64(static_cast<std::uint64_t>(255.0f * menuReveal + 0.5f));
+        nativePush64(static_cast<std::uint64_t>(255.0f * (fadeWithMenu ? menuReveal : 1.0f) + 0.5f));
         nativeCall();
         DrawFormattedText(text, x, y, titleFont);
+    }
+
+    void DrawFpsCounter()
+    {
+        using Clock = std::chrono::steady_clock;
+        static Clock::time_point sampleStart{};
+        static std::uint32_t sampleFrame = 0;
+        static std::string label;
+
+        if (!fpsCounterEnabled)
+        {
+            sampleStart = {};
+            return;
+        }
+
+        nativeInit(isLoadingScreenActive);
+        const auto loading = nativeCall();
+        if (!loading || static_cast<std::uint32_t>(*loading))
+        {
+            sampleStart = {};
+            return;
+        }
+
+        nativeInit(getFrameCount);
+        const auto frame = nativeCall();
+        if (!frame)
+            return;
+        const auto currentFrame = static_cast<std::uint32_t>(*frame);
+        const auto now = Clock::now();
+        const auto elapsed = now - sampleStart;
+        if (sampleStart == Clock::time_point{} || elapsed > std::chrono::seconds(3))
+        {
+            sampleStart = now;
+            sampleFrame = currentFrame;
+            label.clear();
+        }
+        else if (elapsed >= std::chrono::seconds(1))
+        {
+            const auto fps = (currentFrame - sampleFrame) / std::chrono::duration<double>(elapsed).count();
+            label = std::to_string(static_cast<unsigned int>(fps + 0.5)) + " FPS";
+            sampleStart = now;
+            sampleFrame = currentFrame;
+        }
+
+        if (!label.empty())
+        {
+            ScreenText(label, 0.013f, 0.019f, 0.19f, 18, 18, 18, false, false);
+            ScreenText(label, 0.012f, 0.018f, 0.19f, 245, 245, 245, false, false);
+        }
     }
 
     std::string Abbreviate(const std::wstring& value, size_t maxLength)
@@ -891,9 +963,10 @@ namespace
             case 1: return "Move the menu up or down. Save from the main menu.";
             case 2: return "Adjust the menu scale. Save from the main menu.";
             case 3: return "Adjust the menu transparency. Save from the main menu.";
-            case 4: return "Enable or disable native menu sounds. Save to keep this preference.";
-            case 5: return !actionStatus.empty() ? actionStatus :
-                "Restore the menu position, size, opacity, and audio defaults. Save from the main menu.";
+            case fpsCounterRow: return "Show the FPS counter in the top-left corner. Save to keep this preference.";
+            case menuAudioRow: return "Enable or disable native menu sounds. Save to keep this preference.";
+            case menuDefaultsRow: return !actionStatus.empty() ? actionStatus :
+                "Restore the menu defaults. Save from the main menu.";
             default: return {};
             }
         }
@@ -930,6 +1003,8 @@ namespace
         {
             { L"Logging", "Writes general mod activity to the log file." },
             { L"DebugLogging", "Adds detailed debug information to the log." },
+            { L"FramerateCap", "Limit the gameplay frame rate using Framerate Limit." },
+            { L"FramerateLimit", "Set the target frames per second when Framerate Cap is enabled." },
             { L"Notification", "Shows a native notification when Betterment Improvements initializes and warns about errors." },
             { L"SettingsMenu", "Enables the Betterment Improvements in-game configuration menu." },
             { L"MenuKey", "Choose the menu hotkey. Delete clears it; Backspace cancels." },
@@ -1084,7 +1159,7 @@ namespace
         const Section* section = SelectedSection();
         const bool folders = page == Page::IniSections;
         const bool grouped = page == Page::IniEntries && section && !section->menuRows.empty();
-        const int count = page == Page::Root ? 5 : page == Page::MenuSettings ? 6 :
+        const int count = page == Page::Root ? 5 : page == Page::MenuSettings ? menuDefaultsRow + 1 :
             page == Page::IniSections ? static_cast<int>(sections.size()) :
             section ? static_cast<int>(grouped ? section->menuRows.size() : section->entries.size() + 1) : 0;
         const int selectedRow = grouped && selected >= 0 ?
@@ -1129,7 +1204,7 @@ namespace
         NativeText(subtitle, labelX, categoryHeadingY, 19, 238, 226, 205, true);
         if (count > 0)
         {
-            const bool restoring = (page == Page::MenuSettings && selected == 5) ||
+            const bool restoring = (page == Page::MenuSettings && selected == menuDefaultsRow) ||
                 ((page == Page::GeneralSettings || page == Page::IniEntries) && section &&
                     selected == static_cast<int>(section->entries.size()));
             const std::string counter = restoring ? "DEFAULTS" : std::to_string(selected + 1) + " / " +
@@ -1166,7 +1241,7 @@ namespace
             const bool reloadAction = page == Page::Root && index == 4;
             const int entryIndex = grouped ? section->menuRows[index].entryIndex : index;
             const bool headingRow = grouped && entryIndex == -1;
-            const bool resetRow = (page == Page::MenuSettings && index == 5) ||
+            const bool resetRow = (page == Page::MenuSettings && index == menuDefaultsRow) ||
                 ((page == Page::GeneralSettings || page == Page::IniEntries) && section &&
                     (grouped ? entryIndex == -2 : index == static_cast<int>(section->entries.size())));
             const float y = firstY + static_cast<float>(index - first) * rowStep +
@@ -1174,7 +1249,7 @@ namespace
             const float rowCentre = y + rowHeight * 0.5f;
             const float rowTextY = rowCentre - 0.013f;
             const bool active = !headingRow && (resetRow ?
-                (page == Page::MenuSettings ? selected == 5 : selected == static_cast<int>(section->entries.size())) :
+                (page == Page::MenuSettings ? selected == menuDefaultsRow : selected == static_cast<int>(section->entries.size())) :
                 selected == entryIndex);
 
             if (headingRow)
@@ -1225,7 +1300,8 @@ namespace
                 label = L"Restore Defaults";
             else if (page == Page::MenuSettings)
                 label = index == 0 ? L"Position X" : index == 1 ? L"Position Y" :
-                    index == 2 ? L"Size" : index == 3 ? L"Opacity" : L"Menu Audio";
+                    index == 2 ? L"Size" : index == 3 ? L"Opacity" :
+                    index == fpsCounterRow ? L"FPS Counter" : L"Menu Audio";
             else if (page == Page::IniSections)
                 label = sections[index].name;
             else if (section)
@@ -1249,7 +1325,7 @@ namespace
             }
             else if (page != Page::Root && !resetRow)
             {
-                if ((page == Page::MenuSettings && index == 4) ||
+                if ((page == Page::MenuSettings && (index == fpsCounterRow || index == menuAudioRow)) ||
                     (section && section->entries[entryIndex].type == ValueType::Boolean))
                 {
                     if (genericLoaded)
@@ -1257,7 +1333,8 @@ namespace
                         NativeSprite("generic_textures", "tick_box", contentRightX - 0.0085f, rowCentre,
                             0.017f, 0.030f, active ? 238 : 218, active ? 223 : 205,
                             active ? 196 : 184, 245);
-                        if (page == Page::MenuSettings ? menuAudioEnabled : Same(section->entries[entryIndex].value, L"true"))
+                        if (page == Page::MenuSettings ? (index == fpsCounterRow ? fpsCounterEnabled : menuAudioEnabled) :
+                            Same(section->entries[entryIndex].value, L"true"))
                             NativeSprite("generic_textures", "tick", contentRightX - 0.0085f, rowCentre,
                                 0.017f, 0.030f, 235, 36, 31, 255);
                     }
@@ -1411,6 +1488,7 @@ namespace
         menuPositionY = 5;
         menuSize = 100;
         menuOpacity = 100;
+        fpsCounterEnabled = false;
         menuAudioEnabled = true;
         RefreshMenuPreferencesDirty();
         actionStatus = "Menu defaults selected. Save settings to keep them.";
@@ -1435,7 +1513,11 @@ namespace
         {
             float value = 0.0f;
             if (!ParseNumber(entry.value, value))
-                return false;
+            {
+                if (!Same(entry.key, L"FramerateLimit"))
+                    return false;
+                value = GameplayFixes::defaultFramerateLimit;
+            }
             value = (std::max)(entry.minValue, (std::min)(entry.maxValue, value + direction * entry.increment));
             if (entry.increment >= 1.0f)
                 next = std::to_wstring(static_cast<int>(std::round(value)));
@@ -1608,8 +1690,14 @@ namespace Main::ConfigMenu
             pendingInput.fetch_or(action, std::memory_order_release);
     }
 
+    bool IsFpsCounterEnabled()
+    {
+        return fpsCounterEnabled;
+    }
+
     void Update()
     {
+        DrawFpsCounter();
         if (!configured.load(std::memory_order_acquire))
             return;
         const unsigned actions = pendingInput.exchange(0, std::memory_order_acq_rel);
@@ -1698,7 +1786,7 @@ namespace Main::ConfigMenu
         else
         {
             Section* section = SelectedSection();
-            const int count = page == Page::Root ? 5 : page == Page::MenuSettings ? 6 :
+            const int count = page == Page::Root ? 5 : page == Page::MenuSettings ? menuDefaultsRow + 1 :
                 page == Page::IniSections ? static_cast<int>(sections.size()) :
                 section ? static_cast<int>(section->entries.size()) + 1 : 0;
             if (count > 0)
@@ -1746,12 +1834,19 @@ namespace Main::ConfigMenu
                     selected = 0;
                     actionStatus.clear();
                 }
-                else if (page == Page::MenuSettings && (actions & Select) && selected == 5)
+                else if (page == Page::MenuSettings && (actions & Select) && selected == menuDefaultsRow)
                 {
                     RestoreMenuDefaults();
                     PlayMenuSound("SELECT");
                 }
-                else if (page == Page::MenuSettings && selected == 4 && (actions & (Select | Left | Right)))
+                else if (page == Page::MenuSettings && selected == fpsCounterRow && (actions & (Select | Left | Right)))
+                {
+                    fpsCounterEnabled = !fpsCounterEnabled;
+                    RefreshMenuPreferencesDirty();
+                    actionStatus.clear();
+                    PlayMenuSound("SELECT");
+                }
+                else if (page == Page::MenuSettings && selected == menuAudioRow && (actions & (Select | Left | Right)))
                 {
                     if (menuAudioEnabled)
                         PlayMenuSound("SELECT");
@@ -1761,7 +1856,7 @@ namespace Main::ConfigMenu
                     if (menuAudioEnabled)
                         PlayMenuSound("SELECT");
                 }
-                else if (page == Page::MenuSettings && selected < 4 && (actions & (Select | Left | Right)))
+                else if (page == Page::MenuSettings && selected < fpsCounterRow && (actions & (Select | Left | Right)))
                 {
                     if (ChangeMenuPreference((actions & Left) ? -1 : 1))
                         PlayMenuSound((actions & Left) ? "NAV_LEFT" : "NAV_RIGHT", true);

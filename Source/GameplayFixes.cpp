@@ -10,6 +10,7 @@
 #include "Main/Headers/NotifStats.h"
 #include "Main/Headers/Helpers/ModReload.h"
 #include <windows.h>
+#include <chrono>
 #include <string>
 #include <cmath>
 #include <cwchar>
@@ -20,6 +21,82 @@ namespace
     GameplayFixes::Settings settings;
     ULONGLONG nextOtherUpdateAt = 0;
     INIT_ONCE earlyInitialization = INIT_ONCE_STATIC_INIT;
+
+    void PaceGameplayFrame(int fps)
+    {
+        using Clock = std::chrono::steady_clock;
+        static Clock::time_point lastFrame{};
+        static int lastLimit = 0;
+        static HANDLE timer = nullptr;
+        static int checkedLimit = 0;
+        static ULONGLONG nextDisplayCheck = 0;
+        static bool displayCapsFramerate = false;
+        if (fps > 0)
+        {
+            const auto now = GetTickCount64();
+            if (fps != checkedLimit || now >= nextDisplayCheck)
+            {
+                const bool synced = Main::Camera::IsRefreshRateCappedByVsync(fps);
+                if (fps != checkedLimit || synced != displayCapsFramerate)
+                    Logger::Debug(synced ? "Framerate Cap: pacing supplied by the active display's VSync." :
+                        "Framerate Cap: using Betterment's gameplay timer.");
+                displayCapsFramerate = synced;
+                checkedLimit = fps;
+                nextDisplayCheck = now + 3000;
+            }
+            if (displayCapsFramerate)
+                fps = 0;
+        }
+        else
+        {
+            checkedLimit = 0;
+        }
+        if (fps <= 0)
+        {
+            lastLimit = 0;
+            if (timer)
+            {
+                CloseHandle(timer);
+                timer = nullptr;
+            }
+            return;
+        }
+
+        auto now = Clock::now();
+        if (fps == lastLimit)
+        {
+            using TimerTicks = std::chrono::duration<long long, std::ratio<1, 10000000>>;
+            const auto interval = std::chrono::duration<double>(1.0 / fps);
+            const auto remaining = std::chrono::ceil<TimerTicks>(interval - (now - lastFrame));
+            if (remaining.count() > 0)
+            {
+                if (!timer)
+                    timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                        TIMER_MODIFY_STATE | SYNCHRONIZE);
+                LARGE_INTEGER due{};
+                due.QuadPart = -remaining.count();
+                if (!timer || !SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE) ||
+                    WaitForSingleObject(timer, INFINITE) != WAIT_OBJECT_0)
+                    Sleep(static_cast<DWORD>(std::chrono::ceil<std::chrono::milliseconds>(remaining).count()));
+                now = Clock::now();
+            }
+        }
+        lastFrame = now;
+        lastLimit = fps;
+    }
+
+    int ParseFramerateLimit(const std::wstring& value, int fallback)
+    {
+        const wchar_t* start = value.c_str();
+        wchar_t* end = nullptr;
+        const long fps = std::wcstol(start, &end, 10);
+        if (end == start)
+            return fallback;
+        while (std::iswspace(*end))
+            ++end;
+        return *end == L'\0' && fps >= 1 && fps <= GameplayFixes::maximumFramerateLimit ?
+            static_cast<int>(fps) : fallback;
+    }
 
     std::wstring GetIniPath()
     {
@@ -264,6 +341,14 @@ namespace
         GetPrivateProfileStringW(L"General", L"DebugLogging", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"General", L"DebugLogging", L"false") && success;
+
+        if (ReadIniString(path, L"General", L"FramerateCap", L"").empty())
+            success = WriteIniValue(path, L"General", L"FramerateCap", L"false") && success;
+        if (ReadIniString(path, L"General", L"FramerateLimit", L"").empty())
+        {
+            const auto defaultLimit = std::to_wstring(GameplayFixes::defaultFramerateLimit);
+            success = WriteIniValue(path, L"General", L"FramerateLimit", defaultLimit.c_str()) && success;
+        }
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"General", L"Notification", L"", existing, 8, path.c_str());
@@ -628,6 +713,7 @@ namespace
         {
             { L"Visual", L"RemoveCameraFade" },
             { L"Visual", L"DisableFilmGrain" },
+            { L"Engine", L"ExperimentalWaterReflectionFix" },
             { L"Visual", L"ReduceWeaponRecoil" },
             { L"Visual", L"RecoilShakeAmplitudeScale" },
             { L"Visual", L"ReduceFirstPersonWeaponRecoil" },
@@ -870,6 +956,7 @@ namespace
         { L"General", L"Enabled", &GameplayFixes::Settings::enabled, true },
         { L"General", L"SettingsMenu", &GameplayFixes::Settings::settingsMenu, true },
         { L"General", L"Notification", &GameplayFixes::Settings::notification, true },
+        { L"General", L"FramerateCap", &GameplayFixes::Settings::framerateCap, false },
         { L"Engine", L"TextureCrashFix", &GameplayFixes::Settings::textureCrashFix, true },
         { L"Engine", L"ExtendHeapLimits", &GameplayFixes::Settings::extendHeapLimits, true },
         { L"Engine", L"ExtendPackfileLimits", &GameplayFixes::Settings::extendPackfileLimits, true },
@@ -949,6 +1036,12 @@ namespace
         if (Main::ModReload::RequiresGameRestart(section, key))
             return false;
 
+        if (MatchesSetting(section, L"General") && MatchesSetting(key, L"FramerateLimit"))
+        {
+            target.framerateLimit = ParseFramerateLimit(value, target.framerateLimit);
+            return true;
+        }
+
         if (MatchesSetting(section, L"General") && MatchesSetting(key, L"MenuKey"))
         {
             const auto parsed = ParseMenuKey(value);
@@ -980,6 +1073,8 @@ namespace
     {
         for (const auto& option : booleanSettings)
             settings.*option.member = ReadIniBoolean(iniPath, option.section, option.key, option.defaultValue);
+        settings.framerateLimit = ParseFramerateLimit(ReadIniString(iniPath, L"General", L"FramerateLimit", L""),
+            GameplayFixes::defaultFramerateLimit);
         settings.menuKey = ReadMenuKey(iniPath);
         settings.menuModifier = ParseMenuModifier(ReadIniString(iniPath, L"General", L"MenuModifier", L"none"));
         settings.ssrOverscanScale = ReadOverscanScale(iniPath);
@@ -1204,6 +1299,7 @@ namespace GameplayFixes
 
     void Update()
     {
+        PaceGameplayFrame(settings.enabled && settings.framerateCap ? settings.framerateLimit : 0);
         Main::ConfigMenu::Update();
         if (settings.enabled)
         {
@@ -1222,7 +1318,8 @@ namespace GameplayFixes
 
     unsigned int GetUpdateDelay()
     {
-        if (settings.enabled && Main::Horse::NeedsPerFrameUpdate())
+        if (Main::ConfigMenu::IsFpsCounterEnabled() ||
+            (settings.enabled && (settings.framerateCap || Main::Horse::NeedsPerFrameUpdate())))
             return 0U;
         return GetNonHorseUpdateDelay();
     }

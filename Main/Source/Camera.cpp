@@ -443,12 +443,12 @@ namespace
     ULONGLONG fullscreenModeCheckedAt = 0;
     std::wstring fullscreenSettingsPath;
 
-    bool ReadFullscreenDisplayMode(bool& fullscreen)
+    bool ReadVideoSettings(const std::wstring& path, std::string& content)
     {
-        if (fullscreenSettingsPath.empty())
+        if (path.empty())
             return false;
 
-        HANDLE file = CreateFileW(fullscreenSettingsPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE)
             return false;
@@ -461,7 +461,7 @@ namespace
             return false;
         }
 
-        std::string content(static_cast<std::size_t>(length.QuadPart), '\0');
+        content.resize(static_cast<std::size_t>(length.QuadPart));
         DWORD bytesRead = 0;
         const bool read = ReadFile(file, content.data(), static_cast<DWORD>(content.size()), &bytesRead, nullptr) != 0;
         CloseHandle(file);
@@ -469,13 +469,18 @@ namespace
             return false;
         content.resize(bytesRead);
 
+        return true;
+    }
+
+    bool ReadVideoSetting(const std::string& content, const char* tag, char& result)
+    {
         const std::size_t video = content.find("<video>");
         if (video == std::string::npos)
             return false;
         const std::size_t endVideo = content.find("</video>", video);
         if (endVideo == std::string::npos)
             return false;
-        const std::size_t setting = content.find("<windowed", video);
+        const std::size_t setting = content.find(tag, video);
         if (setting == std::string::npos || setting >= endVideo)
             return false;
         const std::size_t endSetting = content.find('>', setting);
@@ -488,7 +493,17 @@ namespace
         if (value + 1 >= endSetting || content[value + 1] != '"')
             return false;
 
-        const char mode = content[value];
+        result = content[value];
+        return true;
+    }
+
+    bool ReadFullscreenDisplayMode(bool& fullscreen)
+    {
+        std::string content;
+        char mode = 0;
+        if (!ReadVideoSettings(fullscreenSettingsPath, content) ||
+            !ReadVideoSetting(content, "<windowed ", mode))
+            return false;
         if (mode != '0' && mode != '1' && mode != '2' && mode != '3')
             return false;
         fullscreen = mode == '0';
@@ -866,6 +881,35 @@ namespace
 
 namespace Main::Camera
 {
+    bool IsRefreshRateCappedByVsync(int fps)
+    {
+        const HWND gameWindow = GetForegroundWindow();
+        DWORD pid = 0;
+        GetWindowThreadProcessId(gameWindow, &pid);
+        if (pid != GetCurrentProcessId())
+            return false;
+
+        MONITORINFOEXW monitor{};
+        monitor.cbSize = sizeof(monitor);
+        if (!GetMonitorInfoW(MonitorFromWindow(gameWindow, MONITOR_DEFAULTTONULL), &monitor))
+            return false;
+
+        DEVMODEW display{};
+        display.dmSize = sizeof(display);
+        if (!EnumDisplaySettingsW(monitor.szDevice, ENUM_CURRENT_SETTINGS, &display) ||
+            display.dmDisplayFrequency <= 1 || display.dmDisplayFrequency > static_cast<DWORD>(fps))
+            return false;
+
+        wchar_t documents[MAX_PATH]{};
+        if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, SHGFP_TYPE_CURRENT, documents)))
+            return false;
+
+        const std::wstring path = std::wstring(documents) + L"\\Rockstar Games\\Red Dead Redemption 2\\Settings\\system.xml";
+        std::string content;
+        char vsync = 0;
+        return ReadVideoSettings(path, content) && ReadVideoSetting(content, "<vSync ", vsync) && vsync == '1';
+    }
+
     void InitializeWindowFocus(bool fixFullscreenTabOut, bool minimizeOnTabOut)
     {
         const bool v2InterfaceActive = (fixFullscreenTabOut || minimizeOnTabOut) && ScriptHookV2InterfaceActive();

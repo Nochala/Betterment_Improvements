@@ -5,11 +5,16 @@
 
 namespace GameplayFixes
 {
+    inline constexpr int defaultFramerateLimit = 60;
+    inline constexpr int maximumFramerateLimit = 1000;
+
     struct Settings
     {
         bool enabled = true;
         bool settingsMenu = true;
         bool notification = true;
+        bool framerateCap = false;
+        int framerateLimit = defaultFramerateLimit;
         int menuKey = 0x77;
         unsigned int menuModifier = 0;
         bool textureCrashFix = true;
