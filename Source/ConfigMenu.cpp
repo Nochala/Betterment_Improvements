@@ -180,19 +180,7 @@ namespace
                     return {};
             }
         }
-        const std::wstring result = directory + L"\\MenuSettings.cache";
-        if (GetFileAttributesW(result.c_str()) == INVALID_FILE_ATTRIBUTES)
-        {
-            const size_t parent = directory.find_last_of(L"\\/");
-            if (parent != std::wstring::npos &&
-                Same(directory.substr(parent + 1), L"BettermentImprovements"))
-            {
-                const std::wstring prior = directory.substr(0, parent + 1) +
-                    L"FusionFixRDR2\\MenuSettings.cache";
-                CopyFileW(prior.c_str(), result.c_str(), TRUE);
-            }
-        }
-        return result;
+        return directory + L"\\MenuSettings.cache";
     }
 
     int ReadCacheNumber(const wchar_t* key, int fallback, int minimum, int maximum, int step = 1)

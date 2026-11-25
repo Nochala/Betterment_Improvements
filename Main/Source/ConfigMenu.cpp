@@ -180,19 +180,7 @@ namespace
                     return {};
             }
         }
-        const std::wstring result = directory + L"\\MenuSettings.cache";
-        if (GetFileAttributesW(result.c_str()) == INVALID_FILE_ATTRIBUTES)
-        {
-            const size_t parent = directory.find_last_of(L"\\/");
-            if (parent != std::wstring::npos &&
-                Same(directory.substr(parent + 1), L"BettermentImprovements"))
-            {
-                const std::wstring prior = directory.substr(0, parent + 1) +
-                    L"FusionFixRDR2\\MenuSettings.cache";
-                CopyFileW(prior.c_str(), result.c_str(), TRUE);
-            }
-        }
-        return result;
+        return directory + L"\\MenuSettings.cache";
     }
 
     int ReadCacheNumber(const wchar_t* key, int fallback, int minimum, int maximum, int step = 1)
@@ -227,18 +215,21 @@ namespace
     bool SaveMenuPreferences()
     {
         if (cachePath.empty())
+        {
+            Logger::FileWriteFailure(L"MenuSettings.cache", "resolve the cache path for writing", ERROR_PATH_NOT_FOUND);
             return false;
+        }
         const std::wstring xValue = std::to_wstring(menuPositionX);
         const std::wstring yValue = std::to_wstring(menuPositionY);
         const std::wstring sizeValue = std::to_wstring(menuSize);
         const std::wstring opacityValue = std::to_wstring(menuOpacity);
         const wchar_t* audioValue = menuAudioEnabled ? L"true" : L"false";
-        return WritePrivateProfileStringW(L"Menu", L"PositionX", xValue.c_str(), cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"PositionY", yValue.c_str(), cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"Size", sizeValue.c_str(), cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"Opacity", opacityValue.c_str(), cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"MenuAudio", audioValue, cachePath.c_str()) &&
-            WritePrivateProfileStringW(L"Menu", L"Orientation", nullptr, cachePath.c_str());
+        return Logger::WriteProfileValue(L"Menu", L"PositionX", xValue.c_str(), cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"PositionY", yValue.c_str(), cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"Size", sizeValue.c_str(), cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"Opacity", opacityValue.c_str(), cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"MenuAudio", audioValue, cachePath.c_str()) &&
+            Logger::WriteProfileValue(L"Menu", L"Orientation", nullptr, cachePath.c_str());
     }
 
     void LoadMenuPreferences()
@@ -1472,7 +1463,7 @@ namespace
         bool success = true;
         for (auto it = pendingChanges.begin(); it != pendingChanges.end();)
         {
-            if (WritePrivateProfileStringW(it->first.first.c_str(), it->first.second.c_str(),
+            if (Logger::WriteProfileValue(it->first.first.c_str(), it->first.second.c_str(),
                 it->second.c_str(), configPath.c_str()))
             {
                 Section* target = Same(it->first.first, L"General") ? &generalSection : nullptr;
@@ -1507,7 +1498,7 @@ namespace
                 success = false;
         }
         Logger::Log(success ? "[SUCCESS] Settings menu: saved." :
-            "[ERROR] Settings menu: some options could not be saved.");
+            "[WARNING] Settings menu: some options could not be saved.");
         return success;
     }
 }

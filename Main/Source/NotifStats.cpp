@@ -326,6 +326,7 @@ namespace Main::NotifStats
 
     void Update()
     {
+        Logger::NotifyLogWriteFailure();
         if (Main::ConfigMenu::IsOpen())
         {
             Dismiss();

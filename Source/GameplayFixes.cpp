@@ -36,42 +36,31 @@ namespace
         gamePath.resize(separator + 1);
         const std::wstring directory = gamePath + L"BettermentImprovements";
         const std::wstring rootIni = gamePath + L"BettermentImprovements.ini";
-        const std::wstring priorIni = gamePath + L"FusionFixRDR2\\FusionFixRDR2.ini";
-        const std::wstring priorRootIni = gamePath + L"FusionFixRDR2.ini";
-        const std::wstring legacyIni = gamePath + L"GameplayFixesRDR2.ini";
-        const std::wstring* candidates[] = { &rootIni, &priorIni, &priorRootIni, &legacyIni };
 
-        if (!CreateDirectoryW(directory.c_str(), nullptr) &&
-            (GetLastError() != ERROR_ALREADY_EXISTS ||
-                GetFileAttributesW(directory.c_str()) == INVALID_FILE_ATTRIBUTES ||
-                (GetFileAttributesW(directory.c_str()) & FILE_ATTRIBUTE_DIRECTORY) == 0))
+        if (!CreateDirectoryW(directory.c_str(), nullptr))
         {
-            Logger::Log("[WARNING] INI: could not create mod folder; using existing configuration.");
-            for (const auto* source : candidates)
+            const DWORD createError = GetLastError();
+            const DWORD attributes = GetFileAttributesW(directory.c_str());
+            if (createError != ERROR_ALREADY_EXISTS || attributes == INVALID_FILE_ATTRIBUTES ||
+                !(attributes & FILE_ATTRIBUTE_DIRECTORY))
             {
-                const DWORD attributes = GetFileAttributesW(source->c_str());
-                if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY))
-                    return *source;
+                Logger::FileWriteFailure((directory + L"\\BettermentImprovements.ini").c_str(),
+                    "prepare the configuration directory", createError == ERROR_ALREADY_EXISTS ? ERROR_DIRECTORY : createError);
+                return rootIni;
             }
-            return rootIni;
         }
 
         const std::wstring iniPath = directory + L"\\BettermentImprovements.ini";
-        if (GetFileAttributesW(iniPath.c_str()) == INVALID_FILE_ATTRIBUTES)
+        const DWORD rootAttributes = GetFileAttributesW(rootIni.c_str());
+        if (GetFileAttributesW(iniPath.c_str()) == INVALID_FILE_ATTRIBUTES &&
+            rootAttributes != INVALID_FILE_ATTRIBUTES && !(rootAttributes & FILE_ATTRIBUTE_DIRECTORY))
         {
-            for (const auto* source : candidates)
+            if (!CopyFileW(rootIni.c_str(), iniPath.c_str(), TRUE))
             {
-                const DWORD attributes = GetFileAttributesW(source->c_str());
-                if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
-                    continue;
-                if (CopyFileW(source->c_str(), iniPath.c_str(), TRUE))
-                {
-                    Logger::Log("[SUCCESS] INI: copied existing config to mod folder.");
-                    break;
-                }
-                Logger::Log("[WARNING] INI: migration failed; using existing config.");
-                return *source;
+                Logger::FileWriteFailure(iniPath.c_str(), "copy the game-root configuration", GetLastError());
+                return rootIni;
             }
+            Logger::Log("[SUCCESS] INI: copied existing config to mod folder.");
         }
         return iniPath;
     }
@@ -240,16 +229,9 @@ namespace
         return static_cast<int>(parsed);
     }
 
-    bool WriteIniValue(const std::wstring& path, const wchar_t* section, const wchar_t* key,
-        const wchar_t* value, const char* description)
+    bool WriteIniValue(const std::wstring& path, const wchar_t* section, const wchar_t* key, const wchar_t* value)
     {
-        if (WritePrivateProfileStringW(section, key, value, path.c_str()))
-            return true;
-
-        const DWORD error = GetLastError();
-        Logger::Log((std::string("[ERROR] INI: could not write ") + description +
-            " (Win32 error " + std::to_string(error) + ").").c_str());
-        return false;
+        return Logger::WriteProfileValue(section, key, value, path.c_str());
     }
 
     bool EnsureIniExists(const std::wstring& path)
@@ -263,45 +245,45 @@ namespace
                 Logger::Log((std::string("[WARNING] INI: unable to inspect existing file (Win32 error ") +
                     std::to_string(error) + ").").c_str());
 
-            success = WriteIniValue(path, L"General", L"Enabled", L"true", "General.Enabled") && success;
+            success = WriteIniValue(path, L"General", L"Enabled", L"true") && success;
             if (success)
                 Logger::Log("[SUCCESS] INI: default config created.");
         }
         else if (attributes & FILE_ATTRIBUTE_DIRECTORY)
         {
-            Logger::Log("[ERROR] INI: config path is a directory, not a file.");
+            Logger::FileWriteFailure(path.c_str(), "write configuration", ERROR_DIRECTORY);
             return false;
         }
 
         wchar_t existing[8] = {};
         GetPrivateProfileStringW(L"General", L"Logging", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"General", L"Logging", L"true", "General.Logging") && success;
+            success = WriteIniValue(path, L"General", L"Logging", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"General", L"DebugLogging", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"General", L"DebugLogging", L"false", "General.DebugLogging") && success;
+            success = WriteIniValue(path, L"General", L"DebugLogging", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"General", L"Notification", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"General", L"Notification", L"true", "General.Notification") && success;
+            success = WriteIniValue(path, L"General", L"Notification", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"General", L"SettingsMenu", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"General", L"SettingsMenu", L"true", "General.SettingsMenu") && success;
+            success = WriteIniValue(path, L"General", L"SettingsMenu", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"General", L"MenuKey", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"General", L"MenuKey", L"F8", "General.MenuKey") && success;
+            success = WriteIniValue(path, L"General", L"MenuKey", L"F8") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"General", L"MenuModifier", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"General", L"MenuModifier", L"none", "General.MenuModifier") && success;
+            success = WriteIniValue(path, L"General", L"MenuModifier", L"none") && success;
 
         wchar_t oldTextureCrashSetting[8] = {};
         GetPrivateProfileStringW(L"Engine", L"YTDCrashFix", L"", oldTextureCrashSetting, 8, path.c_str());
@@ -311,61 +293,61 @@ namespace
         {
             const wchar_t* value = oldTextureCrashSetting[0] == L'\0' ? L"true" :
                 ReadIniBoolean(path, L"Engine", L"YTDCrashFix", true) ? L"true" : L"false";
-            success = WriteIniValue(path, L"Engine", L"TextureCrashFix", value, "Engine.TextureCrashFix") && success;
+            success = WriteIniValue(path, L"Engine", L"TextureCrashFix", value) && success;
         }
         if (oldTextureCrashSetting[0] != L'\0')
         {
             existing[0] = L'\0';
             GetPrivateProfileStringW(L"Engine", L"TextureCrashFix", L"", existing, 8, path.c_str());
             if (existing[0] != L'\0')
-                success = (WritePrivateProfileStringW(L"Engine", L"YTDCrashFix", nullptr, path.c_str()) != FALSE) && success;
+                success = (Logger::WriteProfileValue(L"Engine", L"YTDCrashFix", nullptr, path.c_str()) != FALSE) && success;
         }
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"ExtendHeapLimits", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"ExtendHeapLimits", L"true", "Engine.ExtendHeapLimits") && success;
+            success = WriteIniValue(path, L"Engine", L"ExtendHeapLimits", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"ExtendPackfileLimits", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"ExtendPackfileLimits", L"true", "Engine.ExtendPackfileLimits") && success;
+            success = WriteIniValue(path, L"Engine", L"ExtendPackfileLimits", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"ExtendPedMemoryLimits", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"ExtendPedMemoryLimits", L"true", "Engine.ExtendPedMemoryLimits") && success;
+            success = WriteIniValue(path, L"Engine", L"ExtendPedMemoryLimits", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"ExtendStreamingPools", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"ExtendStreamingPools", L"true", "Engine.ExtendStreamingPools") && success;
+            success = WriteIniValue(path, L"Engine", L"ExtendStreamingPools", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"ExtendPopulationStreamingPools", L"", existing, 8, path.c_str());
         if (existing[0] != L'\0' &&
-            !WritePrivateProfileStringW(L"Engine", L"ExtendPopulationStreamingPools", nullptr, path.c_str()))
+            !Logger::WriteProfileValue(L"Engine", L"ExtendPopulationStreamingPools", nullptr, path.c_str()))
             success = false;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"OptimizeStreamingMemory", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"OptimizeStreamingMemory", L"true", "Engine.OptimizeStreamingMemory") && success;
+            success = WriteIniValue(path, L"Engine", L"OptimizeStreamingMemory", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"ExtendAssetPools", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"ExtendAssetPools", L"true", "Engine.ExtendAssetPools") && success;
+            success = WriteIniValue(path, L"Engine", L"ExtendAssetPools", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"TextureStreamingStutterFix", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"TextureStreamingStutterFix", L"false", "Engine.TextureStreamingStutterFix") && success;
+            success = WriteIniValue(path, L"Engine", L"TextureStreamingStutterFix", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"ImproveTextureStreaming", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"ImproveTextureStreaming", L"true", "Engine.ImproveTextureStreaming") && success;
+            success = WriteIniValue(path, L"Engine", L"ImproveTextureStreaming", L"true") && success;
 
         const wchar_t* obsoleteWaterSettings[][2] =
         {
@@ -377,24 +359,24 @@ namespace
             wchar_t previous[16] = {};
             GetPrivateProfileStringW(option[0], option[1], L"__missing__", previous, 16, path.c_str());
             if (CompareStringOrdinal(previous, -1, L"__missing__", -1, TRUE) != CSTR_EQUAL &&
-                !WritePrivateProfileStringW(option[0], option[1], nullptr, path.c_str()))
+                !Logger::WriteProfileValue(option[0], option[1], nullptr, path.c_str()))
                 success = false;
         }
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"ExpandSSRCoverage", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"ExpandSSRCoverage", L"false", "Engine.ExpandSSRCoverage") && success;
+            success = WriteIniValue(path, L"Engine", L"ExpandSSRCoverage", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"SSROverscanScale", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"SSROverscanScale", L"1.25", "Engine.SSROverscanScale") && success;
+            success = WriteIniValue(path, L"Engine", L"SSROverscanScale", L"1.25") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Engine", L"SSROverscanTestMode", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Engine", L"SSROverscanTestMode", L"0", "Engine.SSROverscanTestMode") && success;
+            success = WriteIniValue(path, L"Engine", L"SSROverscanTestMode", L"0") && success;
 
         const wchar_t* obsoleteVRAMSettings[][2] =
         {
@@ -409,11 +391,11 @@ namespace
             if (CompareStringOrdinal(previous, -1, L"__missing__", -1, TRUE) == CSTR_EQUAL)
                 continue;
 
-            if (WritePrivateProfileStringW(option[0], option[1], nullptr, path.c_str()))
+            if (Logger::WriteProfileValue(option[0], option[1], nullptr, path.c_str()))
             {
                 wchar_t remaining[256] = {};
                 if (GetPrivateProfileSectionW(option[0], remaining, 256, path.c_str()) == 0)
-                    WritePrivateProfileStringW(option[0], nullptr, nullptr, path.c_str());
+                    Logger::WriteProfileValue(option[0], nullptr, nullptr, path.c_str());
             }
             else
             {
@@ -425,20 +407,20 @@ namespace
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Player", L"DisableFirstPersonAutoRun", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Player", L"DisableFirstPersonAutoRun", L"false", "Player.DisableFirstPersonAutoRun") && success;
+            success = WriteIniValue(path, L"Player", L"DisableFirstPersonAutoRun", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Player", L"QuickLootBodies", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Player", L"QuickLootBodies", L"false", "Player.QuickLootBodies") && success;
+            success = WriteIniValue(path, L"Player", L"QuickLootBodies", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Player", L"QuickLootAnimals", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Player", L"QuickLootAnimals", L"false", "Player.QuickLootAnimals") && success;
+            success = WriteIniValue(path, L"Player", L"QuickLootAnimals", L"false") && success;
 
         const auto migrateGameplayOption = [&](const wchar_t* updatedKey, const wchar_t* legacyKey,
-            const wchar_t* olderLegacyKey, const wchar_t* defaultValue, const char* description)
+            const wchar_t* olderLegacyKey, const wchar_t* defaultValue)
         {
             wchar_t updated[8] = {};
             wchar_t legacy[8] = {};
@@ -449,16 +431,16 @@ namespace
                 GetPrivateProfileStringW(L"Gameplay", olderLegacyKey, L"", olderLegacy, 8, path.c_str());
 
             if (updated[0] == L'\0' && !WriteIniValue(path, L"Gameplay", updatedKey,
-                legacy[0] != L'\0' ? legacy : olderLegacy[0] != L'\0' ? olderLegacy : defaultValue, description))
+                legacy[0] != L'\0' ? legacy : olderLegacy[0] != L'\0' ? olderLegacy : defaultValue))
                 return false;
 
             bool migrated = true;
-            if (legacy[0] != L'\0' && !WritePrivateProfileStringW(L"Gameplay", legacyKey, nullptr, path.c_str()))
+            if (legacy[0] != L'\0' && !Logger::WriteProfileValue(L"Gameplay", legacyKey, nullptr, path.c_str()))
             {
                 Logger::Log("[WARNING] INI: could not remove old gameplay setting.");
                 migrated = false;
             }
-            if (olderLegacy[0] != L'\0' && !WritePrivateProfileStringW(L"Gameplay", olderLegacyKey, nullptr, path.c_str()))
+            if (olderLegacy[0] != L'\0' && !Logger::WriteProfileValue(L"Gameplay", olderLegacyKey, nullptr, path.c_str()))
             {
                 Logger::Log("[WARNING] INI: could not remove old gameplay setting.");
                 migrated = false;
@@ -466,78 +448,78 @@ namespace
             return migrated;
         };
         success = migrateGameplayOption(L"DisableAutoHorseEquip", L"NoAutoHorseEquip", nullptr,
-            L"true", "Gameplay.DisableAutoHorseEquip") && success;
+            L"true") && success;
         success = migrateGameplayOption(L"DisableAutoHorseHolster", L"NoAutoHorseHolster", L"NoAutoHorseHolder",
-            L"true", "Gameplay.DisableAutoHorseHolster") && success;
+            L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"DisableHorseAutoJump", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"DisableHorseAutoJump", L"false", "Gameplay.DisableHorseAutoJump") && success;
+            success = WriteIniValue(path, L"Gameplay", L"DisableHorseAutoJump", L"false") && success;
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"DisableHorseWhistleDistance", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"DisableHorseWhistleDistance", L"false", "Gameplay.DisableHorseWhistleDistance") && success;
+            success = WriteIniValue(path, L"Gameplay", L"DisableHorseWhistleDistance", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"FixHorseFollowBehavior", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"FixHorseFollowBehavior", L"false", "Gameplay.FixHorseFollowBehavior") && success;
+            success = WriteIniValue(path, L"Gameplay", L"FixHorseFollowBehavior", L"false") && success;
         success = migrateGameplayOption(L"DisableAutoAmmoPickup", L"NoAutoAmmoPickup", nullptr,
-            L"false", "Gameplay.DisableAutoAmmoPickup") && success;
+            L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"DisableHonorLossWhenMasked", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"DisableHonorLossWhenMasked", L"true", "Gameplay.DisableHonorLossWhenMasked") && success;
+            success = WriteIniValue(path, L"Gameplay", L"DisableHonorLossWhenMasked", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"DisableBountyWhenMasked", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"DisableBountyWhenMasked", L"true", "Gameplay.DisableBountyWhenMasked") && success;
+            success = WriteIniValue(path, L"Gameplay", L"DisableBountyWhenMasked", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"DisableBounties", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"DisableBounties", L"false", "Gameplay.DisableBounties") && success;
+            success = WriteIniValue(path, L"Gameplay", L"DisableBounties", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"FixSelfDefenseHonorLoss", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"FixSelfDefenseHonorLoss", L"true", "Gameplay.FixSelfDefenseHonorLoss") && success;
+            success = WriteIniValue(path, L"Gameplay", L"FixSelfDefenseHonorLoss", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"FixSelfDefenseBounties", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"FixSelfDefenseBounties", L"true", "Gameplay.FixSelfDefenseBounties") && success;
+            success = WriteIniValue(path, L"Gameplay", L"FixSelfDefenseBounties", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"DisableHonorSystem", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"DisableHonorSystem", L"false", "Gameplay.DisableHonorSystem") && success;
+            success = WriteIniValue(path, L"Gameplay", L"DisableHonorSystem", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"DisableBodySearchHonorLoss", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"DisableBodySearchHonorLoss", L"true", "Gameplay.DisableBodySearchHonorLoss") && success;
+            success = WriteIniValue(path, L"Gameplay", L"DisableBodySearchHonorLoss", L"true") && success;
 
         success = migrateGameplayOption(L"DisableAntagonizeHonorLoss", L"DisableAntagonizehHonorLoss", nullptr,
-            L"false", "Gameplay.DisableAntagonizeHonorLoss") && success;
+            L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Gameplay", L"DisableOutOfBoundSnipers", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Gameplay", L"DisableOutOfBoundSnipers", L"false", "Gameplay.DisableOutOfBoundSnipers") && success;
+            success = WriteIniValue(path, L"Gameplay", L"DisableOutOfBoundSnipers", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableAutoReload", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableAutoReload", L"true", "Weapons.DisableAutoReload") && success;
+            success = WriteIniValue(path, L"Weapons", L"DisableAutoReload", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableDeadEyeAutoReload", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableDeadEyeAutoReload", L"true", "Weapons.DisableDeadEyeAutoReload") && success;
+            success = WriteIniValue(path, L"Weapons", L"DisableDeadEyeAutoReload", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableEmptyAutoReload", L"", existing, 8, path.c_str());
@@ -545,9 +527,9 @@ namespace
         GetPrivateProfileStringW(L"Weapons", L"DisableEmptyClipAutoReload", L"", previousEmptyReload, 8, path.c_str());
         if (existing[0] == L'\0')
             success = WriteIniValue(path, L"Weapons", L"DisableEmptyAutoReload",
-                previousEmptyReload[0] != L'\0' ? previousEmptyReload : L"true", "Weapons.DisableEmptyAutoReload") && success;
+                previousEmptyReload[0] != L'\0' ? previousEmptyReload : L"true") && success;
         if (previousEmptyReload[0] != L'\0' &&
-            !WritePrivateProfileStringW(L"Weapons", L"DisableEmptyClipAutoReload", nullptr, path.c_str()))
+            !Logger::WriteProfileValue(L"Weapons", L"DisableEmptyClipAutoReload", nullptr, path.c_str()))
         {
             Logger::Log("[WARNING] INI: could not remove the old Weapons.DisableEmptyClipAutoReload option.");
             success = false;
@@ -556,42 +538,42 @@ namespace
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableArrowTrails", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableArrowTrails", L"false", "Weapons.DisableArrowTrails") && success;
+            success = WriteIniValue(path, L"Weapons", L"DisableArrowTrails", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableReticleSpread", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableReticleSpread", L"false", "Weapons.DisableReticleSpread") && success;
+            success = WriteIniValue(path, L"Weapons", L"DisableReticleSpread", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableReticleSway", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableReticleSway", L"false", "Weapons.DisableReticleSway") && success;
+            success = WriteIniValue(path, L"Weapons", L"DisableReticleSway", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableForcedScope", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableForcedScope", L"true", "Weapons.DisableForcedScope") && success;
+            success = WriteIniValue(path, L"Weapons", L"DisableForcedScope", L"true") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableWeaponDegradation", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableWeaponDegradation", L"false", "Weapons.DisableWeaponDegradation") && success;
+            success = WriteIniValue(path, L"Weapons", L"DisableWeaponDegradation", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableHitmarkers", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableHitmarkers", L"false", "Weapons.DisableHitmarkers") && success;
+            success = WriteIniValue(path, L"Weapons", L"DisableHitmarkers", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"DisableReticleHighlighting", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Weapons", L"DisableReticleHighlighting", L"false", "Weapons.DisableReticleHighlighting") && success;
+            success = WriteIniValue(path, L"Weapons", L"DisableReticleHighlighting", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Weapons", L"ProbeWeaponSignatures", L"", existing, 8, path.c_str());
         if (existing[0] != L'\0' &&
-            !WritePrivateProfileStringW(L"Weapons", L"ProbeWeaponSignatures", nullptr, path.c_str()))
+            !Logger::WriteProfileValue(L"Weapons", L"ProbeWeaponSignatures", nullptr, path.c_str()))
         {
             Logger::Log("[WARNING] INI: could not remove obsolete Weapons.ProbeWeaponSignatures option.");
             success = false;
@@ -600,47 +582,47 @@ namespace
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"CameraFOVOffset", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"CameraFOVOffset", L"0.0", "Visual.CameraFOVOffset") && success;
+            success = WriteIniValue(path, L"Visual", L"CameraFOVOffset", L"0.0") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"RemoveBlackBars", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"RemoveBlackBars", L"false", "Visual.RemoveBlackBars") && success;
+            success = WriteIniValue(path, L"Visual", L"RemoveBlackBars", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableVignette", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableVignette", L"false", "Visual.DisableVignette") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableVignette", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableBloom", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableBloom", L"false", "Visual.DisableBloom") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableBloom", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableChromaticAberration", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableChromaticAberration", L"false", "Visual.DisableChromaticAberration") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableChromaticAberration", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableCompositeDithering", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableCompositeDithering", L"false", "Visual.DisableCompositeDithering") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableCompositeDithering", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"EnableDLSSAutoExposure", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"EnableDLSSAutoExposure", L"false", "Visual.EnableDLSSAutoExposure") && success;
+            success = WriteIniValue(path, L"Visual", L"EnableDLSSAutoExposure", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableInteriorLighting", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableInteriorLighting", L"false", "Visual.DisableInteriorLighting") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableInteriorLighting", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableDistantLights", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableDistantLights", L"false", "Visual.DisableDistantLights") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableDistantLights", L"false") && success;
 
         const wchar_t* obsoleteSettings[][2] =
         {
@@ -663,11 +645,11 @@ namespace
             if (CompareStringOrdinal(previous, -1, L"__missing__", -1, TRUE) == CSTR_EQUAL)
                 continue;
 
-            if (WritePrivateProfileStringW(option[0], option[1], nullptr, path.c_str()))
+            if (Logger::WriteProfileValue(option[0], option[1], nullptr, path.c_str()))
             {
                 wchar_t remaining[256] = {};
                 if (GetPrivateProfileSectionW(option[0], remaining, 256, path.c_str()) == 0)
-                    WritePrivateProfileStringW(option[0], nullptr, nullptr, path.c_str());
+                    Logger::WriteProfileValue(option[0], nullptr, nullptr, path.c_str());
             }
             else
             {
@@ -679,87 +661,87 @@ namespace
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableDrunkFilter", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableDrunkFilter", L"false", "Visual.DisableDrunkFilter") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableDrunkFilter", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisablePauseMenuFilter", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisablePauseMenuFilter", L"false", "Visual.DisablePauseMenuFilter") && success;
+            success = WriteIniValue(path, L"Visual", L"DisablePauseMenuFilter", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableEagleEyeFilter", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableEagleEyeFilter", L"false", "Visual.DisableEagleEyeFilter") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableEagleEyeFilter", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableDeadEyeFilter", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableDeadEyeFilter", L"false", "Visual.DisableDeadEyeFilter") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableDeadEyeFilter", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableWeaponWheelFilter", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableWeaponWheelFilter", L"false", "Visual.DisableWeaponWheelFilter") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableWeaponWheelFilter", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableLowHealthFilter", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableLowHealthFilter", L"false", "Visual.DisableLowHealthFilter") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableLowHealthFilter", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableIdleCamera", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableIdleCamera", L"false", "Visual.DisableIdleCamera") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableIdleCamera", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"FixFullscreenTabOut", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"FixFullscreenTabOut", L"false", "Visual.FixFullscreenTabOut") && success;
+            success = WriteIniValue(path, L"Visual", L"FixFullscreenTabOut", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"MinimizeOnTabOut", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"MinimizeOnTabOut", L"false", "Visual.MinimizeOnTabOut") && success;
+            success = WriteIniValue(path, L"Visual", L"MinimizeOnTabOut", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableCameraSmoothing", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableCameraSmoothing", L"false", "Visual.DisableCameraSmoothing") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableCameraSmoothing", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"DisableHeadBob", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"DisableHeadBob", L"false", "Visual.DisableHeadBob") && success;
+            success = WriteIniValue(path, L"Visual", L"DisableHeadBob", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"ReduceCameraShake", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"ReduceCameraShake", L"false", "Visual.ReduceCameraShake") && success;
+            success = WriteIniValue(path, L"Visual", L"ReduceCameraShake", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Visual", L"ReduceCameraSway", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Visual", L"ReduceCameraSway", L"false", "Visual.ReduceCameraSway") && success;
+            success = WriteIniValue(path, L"Visual", L"ReduceCameraSway", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Ambience", L"DisableAmbientMusic", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Ambience", L"DisableAmbientMusic", L"false", "Ambience.DisableAmbientMusic") && success;
+            success = WriteIniValue(path, L"Ambience", L"DisableAmbientMusic", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Ambience", L"DisableCombatMusic", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Ambience", L"DisableCombatMusic", L"false", "Ambience.DisableCombatMusic") && success;
+            success = WriteIniValue(path, L"Ambience", L"DisableCombatMusic", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Ambience", L"DisableWantedMusic", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Ambience", L"DisableWantedMusic", L"false", "Ambience.DisableWantedMusic") && success;
+            success = WriteIniValue(path, L"Ambience", L"DisableWantedMusic", L"false") && success;
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Diagnostics", L"CrashDiagnostics", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Diagnostics", L"CrashDiagnostics", L"false", "Diagnostics.CrashDiagnostics") && success;
+            success = WriteIniValue(path, L"Diagnostics", L"CrashDiagnostics", L"false") && success;
 
         const wchar_t* obsoleteGraphicsSettings[][2] =
         {
@@ -774,7 +756,7 @@ namespace
             GetPrivateProfileStringW(option[0], option[1], L"__missing__", previous, 16, path.c_str());
             if (CompareStringOrdinal(previous, -1, L"__missing__", -1, TRUE) == CSTR_EQUAL)
                 continue;
-            if (!WritePrivateProfileStringW(option[0], option[1], nullptr, path.c_str()))
+            if (!Logger::WriteProfileValue(option[0], option[1], nullptr, path.c_str()))
             {
                 Logger::Log("[WARNING] INI: could not remove old graphics setting.");
                 success = false;
@@ -785,7 +767,7 @@ namespace
         GetPrivateProfileStringW(L"General", L"UpdateIntervalMs", L"__missing__", obsoleteInterval, 16, path.c_str());
         if (CompareStringOrdinal(obsoleteInterval, -1, L"__missing__", -1, TRUE) != CSTR_EQUAL)
         {
-            if (WritePrivateProfileStringW(L"General", L"UpdateIntervalMs", nullptr, path.c_str()))
+            if (Logger::WriteProfileValue(L"General", L"UpdateIntervalMs", nullptr, path.c_str()))
                 Logger::Log("[INFO] INI: removed old UpdateIntervalMs setting.");
             else
             {
@@ -798,11 +780,11 @@ namespace
         GetPrivateProfileStringW(L"Debug", L"Enabled", L"__missing__", obsoleteDebug, 16, path.c_str());
         if (CompareStringOrdinal(obsoleteDebug, -1, L"__missing__", -1, TRUE) != CSTR_EQUAL)
         {
-            if (WritePrivateProfileStringW(L"Debug", L"Enabled", nullptr, path.c_str()))
+            if (Logger::WriteProfileValue(L"Debug", L"Enabled", nullptr, path.c_str()))
             {
                 wchar_t remaining[256] = {};
                 if (GetPrivateProfileSectionW(L"Debug", remaining, 256, path.c_str()) == 0)
-                    WritePrivateProfileStringW(L"Debug", nullptr, nullptr, path.c_str());
+                    Logger::WriteProfileValue(L"Debug", nullptr, nullptr, path.c_str());
                 Logger::Log("[INFO] INI: removed old Debug.Enabled setting.");
             }
             else
@@ -822,28 +804,28 @@ namespace
             existing[0] = L'\0';
             GetPrivateProfileStringW(L"Startup", key, L"", existing, 8, path.c_str());
             if (existing[0] == L'\0')
-                success = WriteIniValue(path, L"Startup", key, inherited, "Startup skip option") && success;
+                success = WriteIniValue(path, L"Startup", key, inherited) && success;
         }
 
         existing[0] = L'\0';
         GetPrivateProfileStringW(L"Startup", L"StraightToStoryMode", L"", existing, 8, path.c_str());
         if (existing[0] == L'\0')
-            success = WriteIniValue(path, L"Startup", L"StraightToStoryMode", L"false", "Startup.StraightToStoryMode") && success;
+            success = WriteIniValue(path, L"Startup", L"StraightToStoryMode", L"false") && success;
 
         wchar_t obsoleteStartupStatistics[16] = {};
         GetPrivateProfileStringW(L"Startup", L"StartupStatistics", L"__missing__", obsoleteStartupStatistics, 16, path.c_str());
         if (CompareStringOrdinal(obsoleteStartupStatistics, -1, L"__missing__", -1, TRUE) != CSTR_EQUAL)
-            success = WritePrivateProfileStringW(L"Startup", L"StartupStatistics", nullptr, path.c_str()) && success;
+            success = Logger::WriteProfileValue(L"Startup", L"StartupStatistics", nullptr, path.c_str()) && success;
 
         GetPrivateProfileStringW(L"General", L"StartupStatDisplay", L"__missing__", obsoleteStartupStatistics, 16, path.c_str());
         if (CompareStringOrdinal(obsoleteStartupStatistics, -1, L"__missing__", -1, TRUE) != CSTR_EQUAL)
-            success = WritePrivateProfileStringW(L"General", L"StartupStatDisplay", nullptr, path.c_str()) && success;
+            success = Logger::WriteProfileValue(L"General", L"StartupStatDisplay", nullptr, path.c_str()) && success;
 
         wchar_t obsoleteValue[16] = {};
         GetPrivateProfileStringW(L"Startup", L"FastStoryModeLoading", L"__missing__", obsoleteValue, 16, path.c_str());
         if (CompareStringOrdinal(obsoleteValue, -1, L"__missing__", -1, TRUE) != CSTR_EQUAL)
         {
-            if (WritePrivateProfileStringW(L"Startup", L"FastStoryModeLoading", nullptr, path.c_str()))
+            if (Logger::WriteProfileValue(L"Startup", L"FastStoryModeLoading", nullptr, path.c_str()))
                 Logger::Log("[INFO] INI: removed old FastStoryModeLoading setting.");
             else
             {
@@ -855,7 +837,7 @@ namespace
         GetPrivateProfileStringW(L"Startup", L"RemoveOnlineTab", L"__missing__", obsoleteValue, 16, path.c_str());
         if (CompareStringOrdinal(obsoleteValue, -1, L"__missing__", -1, TRUE) != CSTR_EQUAL)
         {
-            if (WritePrivateProfileStringW(L"Startup", L"RemoveOnlineTab", nullptr, path.c_str()))
+            if (Logger::WriteProfileValue(L"Startup", L"RemoveOnlineTab", nullptr, path.c_str()))
                 Logger::Log("[INFO] INI: removed old RemoveOnlineTab setting.");
             else
             {
@@ -866,7 +848,7 @@ namespace
 
         if (success && legacy[0] != L'\0')
         {
-            if (WritePrivateProfileStringW(L"Startup", L"SkipIntroSplashesAndLegal", nullptr, path.c_str()))
+            if (Logger::WriteProfileValue(L"Startup", L"SkipIntroSplashesAndLegal", nullptr, path.c_str()))
                 Logger::Log("[INFO] INI: split old SkipIntroSplashesAndLegal setting.");
             else
                 Logger::Log("[WARNING] INI: old combined skip option could not be removed; the new options take priority.");

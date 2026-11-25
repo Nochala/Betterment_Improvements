@@ -108,6 +108,47 @@ namespace
         return std::memcmp(address, signature, sizeof(signature)) == 0;
     }
 
+    void LogAsiLoaders(const wchar_t* gamePath)
+    {
+        const std::wstring executablePath(gamePath);
+        const auto directoryEnd = executablePath.find_last_of(L"\\/");
+        bool found = false;
+        if (directoryEnd != std::wstring::npos)
+        {
+            const std::wstring gameDirectory = executablePath.substr(0, directoryEnd + 1);
+            struct LoaderProxy
+            {
+                const wchar_t* filename;
+                const char* logName;
+            };
+            constexpr LoaderProxy proxies[] = {
+                { L"dinput8.dll", "dinput8.dll" },
+                { L"version.dll", "version.dll" }
+            };
+
+            for (const auto& proxy : proxies)
+            {
+                // A system DLL with the same name can be loaded alongside the game-local proxy.
+                const std::wstring proxyPath = gameDirectory + proxy.filename;
+                HMODULE module = nullptr;
+                if (!GetModuleHandleExW(0, proxyPath.c_str(), &module))
+                    continue;
+
+                const FileVersion version = ReadFileVersion(proxyPath.c_str());
+                const ImageIdentity identity = ReadImageIdentity(module);
+                FreeLibrary(module);
+
+                Logger::Log((std::string("[VERSION] ASI loader proxy: ") + proxy.logName +
+                    ", fileVersion=" + (version.full.empty() ? "unavailable" : version.full) +
+                    ", " + FormatIdentity(identity) + ".").c_str());
+                found = true;
+            }
+        }
+
+        if (!found)
+            Logger::Log("[VERSION] ASI loader: no game-local dinput8.dll or version.dll loaded.");
+    }
+
     BOOL CALLBACK LogVersionsOnce(PINIT_ONCE, PVOID, PVOID*)
     {
         Logger::Log((std::string("[VERSION] Betterment Improvements ") + Version::Mod + ".").c_str());
@@ -120,6 +161,8 @@ namespace
             (gameVersion.full.empty() ? "unavailable" : gameVersion.full) +
             ", build=" + (gameVersion.build.empty() ? "unavailable" : gameVersion.build) +
             ", " + FormatIdentity(gameIdentity) + ".").c_str());
+
+        LogAsiLoaders(gamePathLength != 0 && gamePathLength < MAX_PATH ? gamePath : L"");
 
         const HMODULE scriptHook = GetModuleHandleW(L"ScriptHookRDR2.dll");
         if (!scriptHook)
